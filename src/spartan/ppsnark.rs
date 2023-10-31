@@ -32,6 +32,9 @@ use once_cell::sync::OnceCell;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use rand_core::RngCore;
+
+
 fn vec_to_arr<T, const N: usize>(v: Vec<T>) -> [T; N] {
   v.try_into()
     .unwrap_or_else(|v: Vec<T>| panic!("Expected a Vec of length {} but it was {}", N, v.len()))
@@ -933,6 +936,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
     S: &R1CSShape<G>,
     U: &RelaxedR1CSInstance<G>,
     W: &RelaxedR1CSWitness<G>,
+    mut rng: impl RngCore,
   ) -> Result<Self, NovaError> {
     // pad the R1CSShape
     let S = S.pad();
@@ -1529,6 +1533,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
       &poly_joint.p,
       &r_z,
       &eval_joint,
+      &mut rng
     )?;
 
     Ok(RelaxedR1CSSNARK {

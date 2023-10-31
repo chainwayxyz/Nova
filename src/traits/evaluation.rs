@@ -6,6 +6,8 @@ use crate::{
   traits::{commitment::CommitmentEngineTrait, Group},
 };
 use serde::{Deserialize, Serialize};
+use rand_core::RngCore;
+
 
 /// A trait that ties different pieces of the commitment evaluation together
 pub trait EvaluationEngineTrait<G: Group>: Clone + Send + Sync {
@@ -32,6 +34,7 @@ pub trait EvaluationEngineTrait<G: Group>: Clone + Send + Sync {
     poly: &[G::Scalar],
     point: &[G::Scalar],
     eval: &G::Scalar,
+    rng: impl RngCore
   ) -> Result<Self::EvaluationArgument, NovaError>;
 
   /// A method to verify the purported evaluation of a multilinear polynomials

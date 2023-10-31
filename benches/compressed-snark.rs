@@ -98,15 +98,18 @@ fn bench_compressed_snark(c: &mut Criterion) {
     // Bench time to produce a compressed SNARK
     group.bench_function("Prove", |b| {
       b.iter(|| {
+        let rng = &mut rand::thread_rng();
         assert!(CompressedSNARK::<_, _, _, _, S1, S2>::prove(
           black_box(&pp),
           black_box(&pk),
-          black_box(&recursive_snark)
+          black_box(&recursive_snark),
+          rng,
         )
         .is_ok());
       })
     });
-    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark);
+    let rng = &mut rand::thread_rng();
+    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark, rng);
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 
@@ -180,15 +183,18 @@ fn bench_compressed_snark_with_computational_commitments(c: &mut Criterion) {
     // Bench time to produce a compressed SNARK
     group.bench_function("Prove", |b| {
       b.iter(|| {
+        let rng = &mut rand::thread_rng();
         assert!(CompressedSNARK::<_, _, _, _, SS1, SS2>::prove(
           black_box(&pp),
           black_box(&pk),
-          black_box(&recursive_snark)
+          black_box(&recursive_snark),
+          rng,
         )
         .is_ok());
       })
     });
-    let res = CompressedSNARK::<_, _, _, _, SS1, SS2>::prove(&pp, &pk, &recursive_snark);
+    let rng = &mut rand::thread_rng();
+    let res = CompressedSNARK::<_, _, _, _, SS1, SS2>::prove(&pp, &pk, &recursive_snark, rng);
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 

@@ -250,7 +250,9 @@ fn main() {
     type S1 = nova_snark::spartan::snark::RelaxedR1CSSNARK<G1, EE1>;
     type S2 = nova_snark::spartan::snark::RelaxedR1CSSNARK<G2, EE2>;
 
-    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark);
+    let rng = &mut rand::thread_rng();
+
+    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark, rng);
     println!(
       "CompressedSNARK::prove: {:?}, took {:?}",
       res.is_ok(),

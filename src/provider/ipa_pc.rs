@@ -12,6 +12,7 @@ use crate::{
 };
 use core::iter;
 use ff::Field;
+use rand_core::RngCore;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -68,11 +69,12 @@ where
     poly: &[G::Scalar],
     point: &[G::Scalar],
     eval: &G::Scalar,
+    mut rng: impl RngCore,
   ) -> Result<Self::EvaluationArgument, NovaError> {
     let u = InnerProductInstance::new(comm, &EqPolynomial::new(point.to_vec()).evals(), eval);
     let w = InnerProductWitness::new(poly);
 
-    InnerProductArgument::prove(ck, &pk.ck_s, &u, &w, transcript)
+    InnerProductArgument::prove(ck, &pk.ck_s, &u, &w, transcript, &mut rng)
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
@@ -174,6 +176,7 @@ where
     U: &InnerProductInstance<G>,
     W: &InnerProductWitness<G>,
     transcript: &mut G::TE,
+    mut _rng: impl RngCore,
   ) -> Result<Self, NovaError> {
     transcript.dom_sep(Self::protocol_name());
 

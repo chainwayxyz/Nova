@@ -26,6 +26,7 @@ pub mod spartan;
 pub mod traits;
 
 use once_cell::sync::OnceCell;
+use rand_core::RngCore;
 
 use crate::bellpepper::{
   r1cs::{NovaShape, NovaWitness},
@@ -661,6 +662,7 @@ where
     pp: &PublicParams<G1, G2, C1, C2>,
     pk: &ProverKey<G1, G2, C1, C2, S1, S2>,
     recursive_snark: &RecursiveSNARK<G1, G2, C1, C2>,
+    mut rng: impl RngCore,
   ) -> Result<Self, NovaError> {
     // fold the secondary circuit's instance
     let res_secondary = NIFS::prove(
@@ -675,27 +677,22 @@ where
     );
 
     let (nifs_secondary, (f_U_secondary, f_W_secondary)) = res_secondary?;
-
     // create SNARKs proving the knowledge of f_W_primary and f_W_secondary
-    let (r_W_snark_primary, f_W_snark_secondary) = rayon::join(
-      || {
-        S1::prove(
-          &pp.ck_primary,
-          &pk.pk_primary,
-          &pp.r1cs_shape_primary,
-          &recursive_snark.r_U_primary,
-          &recursive_snark.r_W_primary,
-        )
-      },
-      || {
-        S2::prove(
-          &pp.ck_secondary,
-          &pk.pk_secondary,
-          &pp.r1cs_shape_secondary,
-          &f_U_secondary,
-          &f_W_secondary,
-        )
-      },
+    let r_W_snark_primary = S1::prove(
+      &pp.ck_primary,
+      &pk.pk_primary,
+      &pp.r1cs_shape_primary,
+      &recursive_snark.r_U_primary,
+      &recursive_snark.r_W_primary,
+      &mut rng,
+    );
+    let f_W_snark_secondary = S2::prove(
+      &pp.ck_secondary,
+      &pk.pk_secondary,
+      &pp.r1cs_shape_secondary,
+      &f_U_secondary,
+      &f_W_secondary,
+      &mut rng,
     );
 
     Ok(Self {
@@ -1092,6 +1089,7 @@ mod tests {
     E1: EvaluationEngineTrait<G1>,
     E2: EvaluationEngineTrait<G2>,
   {
+    let rng = &mut rand::thread_rng();
     let circuit_primary = TrivialCircuit::default();
     let circuit_secondary = CubicCircuit::default();
 
@@ -1150,7 +1148,7 @@ mod tests {
 
     // produce a compressed SNARK
     let res =
-      CompressedSNARK::<_, _, _, _, S<G1, E1>, S<G2, E2>>::prove(&pp, &pk, &recursive_snark);
+      CompressedSNARK::<_, _, _, _, S<G1, E1>, S<G2, E2>>::prove(&pp, &pk, &recursive_snark, rng);
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 
@@ -1181,6 +1179,7 @@ mod tests {
     E1: EvaluationEngineTrait<G1>,
     E2: EvaluationEngineTrait<G2>,
   {
+    let rng = &mut rand::thread_rng();
     let circuit_primary = TrivialCircuit::default();
     let circuit_secondary = CubicCircuit::default();
 
@@ -1245,6 +1244,7 @@ mod tests {
       &pp,
       &pk,
       &recursive_snark,
+      rng
     );
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
@@ -1282,6 +1282,7 @@ mod tests {
     E1: EvaluationEngineTrait<G1>,
     E2: EvaluationEngineTrait<G2>,
   {
+    let rng = &mut rand::thread_rng();
     // y is a non-deterministic advice representing the fifth root of the input at a step.
     #[derive(Clone, Debug)]
     struct FifthRootCheckingCircuit<F: PrimeField> {
@@ -1396,7 +1397,7 @@ mod tests {
 
     // produce a compressed SNARK
     let res =
-      CompressedSNARK::<_, _, _, _, S<G1, E1>, S<G2, E2>>::prove(&pp, &pk, &recursive_snark);
+      CompressedSNARK::<_, _, _, _, S<G1, E1>, S<G2, E2>>::prove(&pp, &pk, &recursive_snark, rng);
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 

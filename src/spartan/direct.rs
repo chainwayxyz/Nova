@@ -17,6 +17,7 @@ use crate::{
   Commitment, CommitmentKey,
 };
 use bellpepper_core::{num::AllocatedNum, Circuit, ConstraintSystem, SynthesisError};
+use rand_core::RngCore;
 use core::marker::PhantomData;
 use ff::Field;
 use serde::{Deserialize, Serialize};
@@ -120,7 +121,7 @@ impl<G: Group, S: RelaxedR1CSSNARKTrait<G>, C: StepCircuit<G::Scalar>> DirectSNA
   }
 
   /// Produces a proof of satisfiability of the provided circuit
-  pub fn prove(pk: &ProverKey<G, S>, sc: C, z_i: &[G::Scalar]) -> Result<Self, NovaError> {
+  pub fn prove(pk: &ProverKey<G, S>, sc: C, z_i: &[G::Scalar], mut rng: impl RngCore) -> Result<Self, NovaError> {
     let mut cs: SatisfyingAssignment<G> = SatisfyingAssignment::new();
 
     let circuit: DirectCircuit<G, C> = DirectCircuit {
@@ -140,7 +141,7 @@ impl<G: Group, S: RelaxedR1CSSNARKTrait<G>, C: StepCircuit<G::Scalar>> DirectSNA
     );
 
     // prove the instance using Spartan
-    let snark = S::prove(&pk.ck, &pk.pk, &pk.S, &u_relaxed, &w_relaxed)?;
+    let snark = S::prove(&pk.ck, &pk.pk, &pk.S, &u_relaxed, &w_relaxed, &mut rng)?;
 
     Ok(DirectSNARK {
       comm_W: u.comm_W,
@@ -245,6 +246,8 @@ mod tests {
   }
 
   fn test_direct_snark_with<G: Group, S: RelaxedR1CSSNARKTrait<G>>() {
+    
+
     let circuit = CubicCircuit::default();
 
     // produce keys
@@ -258,8 +261,9 @@ mod tests {
     let mut z_i = z0;
 
     for _i in 0..num_steps {
+      let rng = &mut rand::thread_rng();
       // produce a SNARK
-      let res = DirectSNARK::prove(&pk, circuit.clone(), &z_i);
+      let res = DirectSNARK::prove(&pk, circuit.clone(), &z_i, rng);
       assert!(res.is_ok());
 
       let z_i_plus_one = circuit.output(&z_i);

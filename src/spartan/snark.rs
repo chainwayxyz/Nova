@@ -24,6 +24,7 @@ use crate::{
 use ff::Field;
 use once_cell::sync::OnceCell;
 
+use rand_core::RngCore;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -116,6 +117,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
     S: &R1CSShape<G>,
     U: &RelaxedR1CSInstance<G>,
     W: &RelaxedR1CSWitness<G>,
+    mut rng: impl RngCore,
   ) -> Result<Self, NovaError> {
     // pad the R1CSShape
     let S = S.pad();
@@ -350,6 +352,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
       &poly_joint.p,
       &r_z,
       &eval_joint,
+      &mut rng,
     )?;
 
     Ok(RelaxedR1CSSNARK {

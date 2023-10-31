@@ -6,6 +6,7 @@ use crate::{
   CommitmentKey,
 };
 
+use rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 
 /// A trait that defines the behavior of a `zkSNARK`
@@ -31,6 +32,7 @@ pub trait RelaxedR1CSSNARKTrait<G: Group>:
     S: &R1CSShape<G>,
     U: &RelaxedR1CSInstance<G>,
     W: &RelaxedR1CSWitness<G>,
+    rng: impl RngCore,
   ) -> Result<Self, NovaError>;
 
   /// Verifies a SNARK for a relaxed R1CS
