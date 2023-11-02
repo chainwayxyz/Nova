@@ -21,6 +21,25 @@ pub struct CommitmentKey<G: Group> {
   ck: Vec<G::PreprocessedGroupElement>,
 }
 
+impl<G: Group> CommitmentKey<G> {
+  /// Returns an iterator over the commitment key
+  pub fn iter(&self) -> impl Iterator<Item = &G::PreprocessedGroupElement> {
+    self.ck.iter()
+  }
+
+  /// Returns mutable iterator over the commitment key
+  pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut G::PreprocessedGroupElement> {
+    self.ck.iter_mut()
+  }
+
+  /// Returns the length of the commitment key
+  pub fn len(&self) -> usize {
+    self.ck.len()
+  }
+
+
+}
+
 /// A type that holds a commitment
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -193,8 +212,15 @@ impl<G: Group> CommitmentEngineTrait<G> for CommitmentEngine<G> {
     }
   }
 
-  fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment {
+  fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar], r: G::Scalar) -> Self::Commitment {
     assert!(ck.ck.len() >= v.len());
+    let mut tmp_scalars = Vec::with_capacity(v.len() + 1);
+    let mut tmp_bases = Vec::with_capacity(v.len() + 1);
+    tmp_scalars.extend(ck.iter());
+    tmp_scalars.push(r);
+    tmp_bases.extend(v.iter());
+
+
     Commitment {
       comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
     }

@@ -75,7 +75,7 @@ pub trait CommitmentTrait<G: Group>:
 /// A trait that ties different pieces of the commitment generation together
 pub trait CommitmentEngineTrait<G: Group>: Clone + Send + Sync {
   /// Holds the type of the commitment key
-  type CommitmentKey: Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de>;
+  type CommitmentKey: Iterator + Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// Holds the type of the commitment
   type Commitment: CommitmentTrait<G>;
@@ -84,5 +84,5 @@ pub trait CommitmentEngineTrait<G: Group>: Clone + Send + Sync {
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey;
 
   /// Commits to the provided vector using the provided generators
-  fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment;
+  fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar], r: G::Scalar) -> Self::Commitment;
 }

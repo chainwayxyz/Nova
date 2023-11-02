@@ -188,6 +188,7 @@ where
 
     // absorb the instance in the transcript
     transcript.absorb(b"U", U);
+    let blind = G::Scalar::random(&mut _rng);
 
     // sample a random base for committing to the inner product
     let r = transcript.squeeze(b"r")?;
@@ -221,6 +222,7 @@ where
           .chain(iter::once(&c_L))
           .copied()
           .collect::<Vec<G::Scalar>>(),
+        r,
       )
       .compress();
       let R = CE::<G>::commit(
@@ -230,6 +232,7 @@ where
           .chain(iter::once(&c_R))
           .copied()
           .collect::<Vec<G::Scalar>>(),
+        r,
       )
       .compress();
 
@@ -309,7 +312,7 @@ where
     let r = transcript.squeeze(b"r")?;
     let ck_c = ck_c.scale(&r);
 
-    let P = U.comm_a_vec + CE::<G>::commit(&ck_c, &[U.c]);
+    let P = U.comm_a_vec + CE::<G>::commit(&ck_c, &[U.c], &r);
 
     let batch_invert = |v: &[G::Scalar]| -> Result<Vec<G::Scalar>, NovaError> {
       let mut products = vec![G::Scalar::ZERO; v.len()];
