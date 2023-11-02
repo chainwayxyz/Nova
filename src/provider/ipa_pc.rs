@@ -175,9 +175,12 @@ where
     W: &InnerProductWitness<G>,
     transcript: &mut G::TE,
   ) -> Result<Self, NovaError> {
+    println!("called ipa prove");
     transcript.dom_sep(Self::protocol_name());
 
+    //println!("ck: {:?}");
     let (ck, _) = ck.split_at(U.b_vec.len());
+    //println!("ck: {:?}", ck);
 
     if U.b_vec.len() != W.a_vec.len() {
       return Err(NovaError::InvalidInputLength);

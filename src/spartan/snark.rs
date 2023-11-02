@@ -117,6 +117,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
     U: &RelaxedR1CSInstance<G>,
     W: &RelaxedR1CSWitness<G>,
   ) -> Result<Self, NovaError> {
+    println!("called snark prove");
     // pad the R1CSShape
     let S = S.pad();
     // sanity check that R1CSShape has all required size characteristics

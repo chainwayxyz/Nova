@@ -662,6 +662,7 @@ where
     pk: &ProverKey<G1, G2, C1, C2, S1, S2>,
     recursive_snark: &RecursiveSNARK<G1, G2, C1, C2>,
   ) -> Result<Self, NovaError> {
+    println!("called compressed snark prove");
     // fold the secondary circuit's instance
     let res_secondary = NIFS::prove(
       &pp.ck_secondary,
@@ -675,6 +676,8 @@ where
     );
 
     let (nifs_secondary, (f_U_secondary, f_W_secondary)) = res_secondary?;
+
+    println!("1");
 
     // create SNARKs proving the knowledge of f_W_primary and f_W_secondary
     let (r_W_snark_primary, f_W_snark_secondary) = rayon::join(
@@ -697,6 +700,8 @@ where
         )
       },
     );
+
+    println!("2");
 
     Ok(Self {
       r_U_primary: recursive_snark.r_U_primary.clone(),
