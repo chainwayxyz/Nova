@@ -307,16 +307,44 @@ where
   ) -> Result<Self, NovaError> {
     transcript.dom_sep(Self::protocol_name());
 
+    let (ck, _) = ck.split_at(U.b_vec.len() + 1);
+
+    if U.b_vec.len() != W.a_vec.len() {
+      return Err(NovaError::InvalidInputLength);
+    }
+
     let mut s_poly = W.a_vec.clone();
     for coeff in s_poly.iter_mut() {
       *coeff = G::Scalar::random(&mut rng);
     }
 
-    let (ck, _) = ck.split_at(U.b_vec.len());
+    let eval_polynomial = |poly: &[G::Scalar], point: G::Scalar| -> G::Scalar {
+      poly.iter().rev().fold(G::Scalar::ZERO, |acc, coeff| acc * point + coeff)
+    };
 
-    if U.b_vec.len() != W.a_vec.len() {
-      return Err(NovaError::InvalidInputLength);
-    }
+    let s_at_z = eval_polynomial(&s_poly, U.b_vec[1]);
+    s_poly[0] -= &s_at_z;
+    let s_poly_blind = G::Scalar::random(&mut rng);
+
+    let mut vw = s_poly.to_vec();
+    vw.push(s_poly_blind);
+
+    let s_poly_commitment = CE::<G>::commit(&ck, &vw);
+
+    let (ck, s) = ck.split_at(U.b_vec.len());
+
+    let comm_a = CommitmentKey::<G>::reinterpret_commitments_as_ck(&[U.comm_a_vec.compress()])?;
+    let comm_s = CommitmentKey::<G>::reinterpret_commitments_as_ck(&[s_poly_commitment.compress()])?;
+
+    let alpha: G::Scalar = transcript.squeeze(b"alpha")?;
+    let w = G::Scalar::random(&mut rng);
+    let w_prime = w + s_poly_blind * alpha;
+    let _p_prime = W.a_vec.iter().zip(s_poly).map(|(a, s)| *a + alpha * s).collect::<Vec<G::Scalar>>();
+
+    //let _comm_prime = comm_a + alpha * comm_s - s * w_prime;
+
+    let _comm_prime = CE::<G>::commit(&comm_a.combine(&comm_s).combine(&s), &[G::Scalar::ONE, alpha, -w_prime]);
+
 
     // absorb the instance in the transcript
     transcript.absorb(b"U", U);
