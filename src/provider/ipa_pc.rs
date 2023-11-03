@@ -186,13 +186,21 @@ where
       return Err(NovaError::InvalidInputLength);
     }
 
+    // Sample a random polynomial (of same degree) that has a root at point, first
+    // by setting all coefficients to random values.
+    let mut sample_rand_poly = (W.a_vec).clone();
+    for coeff in sample_rand_poly.iter_mut() {
+        *coeff = G::Scalar::random(&mut _rng);
+    }
+
     // absorb the instance in the transcript
     transcript.absorb(b"U", U);
-    let blind = G::Scalar::random(&mut _rng);
+    // let blind = G::Scalar::random(&mut _rng);
 
     // sample a random base for committing to the inner product
     let r = transcript.squeeze(b"r")?;
     let ck_c = ck_c.scale(&r);
+    let rnd = G::Scalar::random(&mut _rng);
 
     // a closure that executes a step of the recursive inner product argument
     let prove_inner = |a_vec: &[G::Scalar],
@@ -215,24 +223,24 @@ where
       let c_L = inner_product(&a_vec[0..n / 2], &b_vec[n / 2..n]);
       let c_R = inner_product(&a_vec[n / 2..n], &b_vec[0..n / 2]);
 
-      let L = CE::<G>::commit(
+      let L = CE::<G>::commit_zk(
         &ck_R.combine(&ck_c),
         &a_vec[0..n / 2]
           .iter()
           .chain(iter::once(&c_L))
           .copied()
           .collect::<Vec<G::Scalar>>(),
-        r,
+        rnd,
       )
       .compress();
-      let R = CE::<G>::commit(
+      let R = CE::<G>::commit_zk(
         &ck_L.combine(&ck_c),
         &a_vec[n / 2..n]
           .iter()
           .chain(iter::once(&c_R))
           .copied()
           .collect::<Vec<G::Scalar>>(),
-        r,
+        rnd,
       )
       .compress();
 
@@ -312,7 +320,7 @@ where
     let r = transcript.squeeze(b"r")?;
     let ck_c = ck_c.scale(&r);
 
-    let P = U.comm_a_vec + CE::<G>::commit(&ck_c, &[U.c], &r);
+    let P = U.comm_a_vec + CE::<G>::open(&ck_c, &[U.c]);
 
     let batch_invert = |v: &[G::Scalar]| -> Result<Vec<G::Scalar>, NovaError> {
       let mut products = vec![G::Scalar::ZERO; v.len()];
@@ -379,7 +387,7 @@ where
     };
 
     let ck_hat = {
-      let c = CE::<G>::commit(&ck, &s).compress();
+      let c = CE::<G>::open(&ck, &s).compress();
       CommitmentKey::<G>::reinterpret_commitments_as_ck(&[c])?
     };
 
@@ -393,7 +401,7 @@ where
         ck_L.combine(&ck_R).combine(&ck_P)
       };
 
-      CE::<G>::commit(
+      CE::<G>::open(
         &ck_folded,
         &r_square
           .iter()
@@ -404,7 +412,7 @@ where
       )
     };
 
-    if P_hat == CE::<G>::commit(&ck_hat.combine(&ck_c), &[self.a_hat, self.a_hat * b_hat]) {
+    if P_hat == CE::<G>::open(&ck_hat.combine(&ck_c), &[self.a_hat, self.a_hat * b_hat]) {
       Ok(())
     } else {
       Err(NovaError::InvalidIPA)

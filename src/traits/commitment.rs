@@ -9,7 +9,6 @@ use core::{
   ops::{Add, AddAssign},
 };
 use serde::{Deserialize, Serialize};
-
 use super::ScalarMul;
 
 /// Defines basic operations on commitments
@@ -75,7 +74,7 @@ pub trait CommitmentTrait<G: Group>:
 /// A trait that ties different pieces of the commitment generation together
 pub trait CommitmentEngineTrait<G: Group>: Clone + Send + Sync {
   /// Holds the type of the commitment key
-  type CommitmentKey: Iterator + Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de>;
+  type CommitmentKey: Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// Holds the type of the commitment
   type Commitment: CommitmentTrait<G>;
@@ -83,6 +82,12 @@ pub trait CommitmentEngineTrait<G: Group>: Clone + Send + Sync {
   /// Samples a new commitment key of a specified size
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey;
 
+    /// Commits to the provided vector using the provided generators with additional blinding
+  fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment;
+
   /// Commits to the provided vector using the provided generators
-  fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar], r: G::Scalar) -> Self::Commitment;
+  fn commit_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], rnd:G::Scalar) -> Self::Commitment;
+
+  /// Opens the commitment at the provided index
+  fn open(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment;
 }

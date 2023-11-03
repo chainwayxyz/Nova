@@ -22,21 +22,24 @@ pub struct CommitmentKey<G: Group> {
 }
 
 impl<G: Group> CommitmentKey<G> {
-  /// Returns an iterator over the commitment key
-  pub fn iter(&self) -> impl Iterator<Item = &G::PreprocessedGroupElement> {
-    self.ck.iter()
-  }
+  // /// Returns an iterator over the commitment key
+  // pub fn iter(&self) -> impl Iterator<Item = &G::PreprocessedGroupElement> {
+  //   self.ck.iter()
+  // }
 
-  /// Returns mutable iterator over the commitment key
-  pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut G::PreprocessedGroupElement> {
-    self.ck.iter_mut()
-  }
+  // /// Returns mutable iterator over the commitment key
+  // pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut G::PreprocessedGroupElement> {
+  //   self.ck.iter_mut()
+  // }
 
-  /// Returns the length of the commitment key
-  pub fn len(&self) -> usize {
-    self.ck.len()
-  }
+  // /// Returns the length of the commitment key
+  // pub fn len(&self) -> usize {
+  //   self.ck.len()
+  // }
 
+  // fn next(&mut self) -> Option<G::PreprocessedGroupElement> {
+  //     self.ck.next()
+  // }
 
 }
 
@@ -212,20 +215,35 @@ impl<G: Group> CommitmentEngineTrait<G> for CommitmentEngine<G> {
     }
   }
 
-  fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar], r: G::Scalar) -> Self::Commitment {
+  fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment {
     assert!(ck.ck.len() >= v.len());
-    let mut tmp_scalars = Vec::with_capacity(v.len() + 1);
-    let mut tmp_bases = Vec::with_capacity(v.len() + 1);
-    tmp_scalars.extend(ck.iter());
-    tmp_scalars.push(r);
-    tmp_bases.extend(v.iter());
-
-
     Commitment {
       comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
     }
   }
+
+  fn commit_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], rnd: G::Scalar) -> Self::Commitment {
+    assert!(ck.ck.len() >= v.len());
+    let mut tmp_scalars = Vec::with_capacity(v.len() + 1);
+    tmp_scalars.extend(v.iter());
+    tmp_scalars.push(rnd);
+    //create v_new as a slice from tmp_scalars
+    let v_new = &tmp_scalars[..];
+    Commitment {
+      comm: G::vartime_multiscalar_mul(v_new, &ck.ck[..v.len() + 1]),
+    }
+  }
+
+  fn open(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment {
+    assert!(ck.ck.len() >= v.len());
+    Commitment {
+      comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
+    }
+  }
+
 }
+
+
 
 /// A trait listing properties of a commitment key that can be managed in a divide-and-conquer fashion
 pub trait CommitmentKeyExtTrait<G: Group> {

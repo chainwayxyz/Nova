@@ -942,7 +942,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
     let S = S.pad();
     // sanity check that R1CSShape has all required size characteristics
     assert!(S.is_regular_shape());
-    let 
 
     let W = W.pad(&S); // pad the witness
     let mut transcript = G::TE::new(b"RelaxedR1CSSNARK");
@@ -1003,7 +1002,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
     // E_col(i) = z(col(i)) for all i
     let (mem_row, mem_col, E_row, E_col) = pk.S_repr.evaluation_oracles(&S, &tau, &z);
     let (comm_E_row, comm_E_col) =
-      rayon::join(|| G::CE::commit(ck, &E_row, r), || G::CE::commit(ck, &E_col, r));
+      rayon::join(|| G::CE::commit(ck, &E_row), || G::CE::commit(ck, &E_col));
 
     // absorb the claimed evaluations into the transcript
     transcript.absorb(
