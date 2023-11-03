@@ -26,6 +26,7 @@ pub mod spartan;
 pub mod traits;
 
 use once_cell::sync::OnceCell;
+use rand_core::RngCore;
 
 use crate::bellpepper::{
   r1cs::{NovaShape, NovaWitness},
@@ -696,6 +697,62 @@ where
           &f_W_secondary,
         )
       },
+    );
+
+    Ok(Self {
+      r_U_primary: recursive_snark.r_U_primary.clone(),
+      r_W_snark_primary: r_W_snark_primary?,
+
+      r_U_secondary: recursive_snark.r_U_secondary.clone(),
+      l_u_secondary: recursive_snark.l_u_secondary.clone(),
+      nifs_secondary,
+      f_W_snark_secondary: f_W_snark_secondary?,
+
+      zn_primary: recursive_snark.zi_primary.clone(),
+      zn_secondary: recursive_snark.zi_secondary.clone(),
+
+      _p_c1: Default::default(),
+      _p_c2: Default::default(),
+    })
+  }
+
+  /// Create a new `CompressedSNARK` with ZK
+  pub fn prove_zk(
+    pp: &PublicParams<G1, G2, C1, C2>,
+    pk: &ProverKey<G1, G2, C1, C2, S1, S2>,
+    recursive_snark: &RecursiveSNARK<G1, G2, C1, C2>,
+    mut rng: impl RngCore,
+  ) -> Result<Self, NovaError> {
+    // fold the secondary circuit's instance
+    let res_secondary = NIFS::prove(
+      &pp.ck_secondary,
+      &pp.ro_consts_secondary,
+      &scalar_as_base::<G1>(pp.digest()),
+      &pp.r1cs_shape_secondary,
+      &recursive_snark.r_U_secondary,
+      &recursive_snark.r_W_secondary,
+      &recursive_snark.l_u_secondary,
+      &recursive_snark.l_w_secondary,
+    );
+
+    let (nifs_secondary, (f_U_secondary, f_W_secondary)) = res_secondary?;
+
+    // create SNARKs proving the knowledge of f_W_primary and f_W_secondary
+    let r_W_snark_primary = S1::prove_zk(
+      &pp.ck_primary,
+      &pk.pk_primary,
+      &pp.r1cs_shape_primary,
+      &recursive_snark.r_U_primary,
+      &recursive_snark.r_W_primary,
+      &mut rng,
+    );
+    let f_W_snark_secondary = S2::prove_zk(
+      &pp.ck_secondary,
+      &pk.pk_secondary,
+      &pp.r1cs_shape_secondary,
+      &f_U_secondary,
+      &f_W_secondary,
+      &mut rng,
     );
 
     Ok(Self {

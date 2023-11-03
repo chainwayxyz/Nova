@@ -14,6 +14,7 @@ use nova_snark::{
   CompressedSNARK, PublicParams, RecursiveSNARK,
 };
 use num_bigint::BigUint;
+use rand::thread_rng;
 use std::time::Instant;
 
 #[derive(Clone, Debug)]
@@ -129,154 +130,101 @@ where
   }
 }
 
+type C1 = MinRootCircuit<<G1 as Group>::Scalar>;
+type C2 = TrivialCircuit<<G2 as Group>::Scalar>;
+type EE1 = nova_snark::provider::ipa_pc::EvaluationEngine<G1>;
+type EE2 = nova_snark::provider::ipa_pc::EvaluationEngine<G2>;
+type S1 = nova_snark::spartan::snark::RelaxedR1CSSNARK<G1, EE1>;
+type S2 = nova_snark::spartan::snark::RelaxedR1CSSNARK<G2, EE2>;
+
+fn get_primary_circuit(num_iters_per_step: usize) -> C1 {
+  let circuit_primary = MinRootCircuit {
+    seq: vec![
+      MinRootIteration {
+        x_i: <G1 as Group>::Scalar::zero(),
+        y_i: <G1 as Group>::Scalar::zero(),
+        x_i_plus_1: <G1 as Group>::Scalar::zero(),
+        y_i_plus_1: <G1 as Group>::Scalar::zero(),
+      };
+      num_iters_per_step
+    ],
+  };
+  return circuit_primary;
+}
+
+fn get_z0_and_circuits(num_iters_per_step: usize, num_steps: usize) -> (Vec<<G1 as Group>::Scalar>, Vec<<G2 as Group>::Scalar>, Vec<C1>) {
+  // produce non-deterministic advice
+  let (z0_primary, minroot_iterations) = MinRootIteration::new(num_iters_per_step * num_steps, &<G1 as Group>::Scalar::zero(), &<G1 as Group>::Scalar::one());
+  let minroot_circuits = (0..num_steps)
+    .map(|i| MinRootCircuit {
+      seq: (0..num_iters_per_step)
+        .map(|j| MinRootIteration {
+          x_i: minroot_iterations[i * num_iters_per_step + j].x_i,
+          y_i: minroot_iterations[i * num_iters_per_step + j].y_i,
+          x_i_plus_1: minroot_iterations[i * num_iters_per_step + j].x_i_plus_1,
+          y_i_plus_1: minroot_iterations[i * num_iters_per_step + j].y_i_plus_1,
+        })
+        .collect::<Vec<_>>(),
+    })
+    .collect::<Vec<_>>();
+
+  let z0_secondary = vec![<G2 as Group>::Scalar::zero()];
+  return (z0_primary, z0_secondary, minroot_circuits);
+}
+
+fn iteration(num_iters_per_step: usize, num_steps: usize) {
+  // number of iterations of MinRoot per Nova's recursive step
+  let circuit_primary = get_primary_circuit(num_iters_per_step);
+  let circuit_secondary = TrivialCircuit::default();
+  let pp = PublicParams::<G1, G2, C1, C2>::setup(&circuit_primary, &circuit_secondary);
+
+  println!("constraints:\n    primary: {},\n    secondary: {}\nvariables:\n    primary: {},\n    secondary: {}\n", pp.num_constraints().0, pp.num_constraints().1, pp.num_variables().0, pp.num_variables().1);
+
+  let (z0_primary, z0_secondary, minroot_circuits) = get_z0_and_circuits(num_iters_per_step, num_steps);
+
+  println!("recursive snark");
+  let mut recursive_snark = RecursiveSNARK::<G1, G2, C1, C2>::new(&pp, &minroot_circuits[0], &circuit_secondary, &z0_primary, &z0_secondary).unwrap();
+
+  for (i, circuit_primary) in minroot_circuits.iter().take(num_steps).enumerate() {
+    let res = recursive_snark.prove_step(&pp, circuit_primary, &circuit_secondary);
+    assert!(res.is_ok());
+    println!("recursive snark prove step {i}: {}", res.is_ok());
+  }
+
+  print!("verify recursive snark: ");
+  let res = recursive_snark.verify(&pp, num_steps, &z0_primary, &z0_secondary);
+  println!("{}", res.is_ok());
+  assert!(res.is_ok());
+
+  print!("compressed snark using Spartan with IPA-PC: ");
+  let (pk, vk) = CompressedSNARK::<_, _, _, _, S1, S2>::setup(&pp).unwrap();
+
+  let mut rng = thread_rng();
+  let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove_zk(&pp, &pk, &recursive_snark, &mut rng);
+  println!("{}", res.is_ok());
+  assert!(res.is_ok());
+  let compressed_snark = res.unwrap();
+
+  print!("encode compressed snark, len: ");
+  let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+  bincode::serialize_into(&mut encoder, &compressed_snark).unwrap();
+  let compressed_snark_encoded = encoder.finish().unwrap();
+  println!("{} bytes", compressed_snark_encoded.len());
+
+  print!("verify compressed snark: ");
+  let res = compressed_snark.verify(&vk, num_steps, &z0_primary, &z0_secondary);
+  println!("{}", res.is_ok());
+  assert!(res.is_ok());
+  println!("=========================================================");
+}
+
 /// cargo run --release --example minroot
 fn main() {
+  let start = Instant::now();
   println!("Nova-based VDF with MinRoot delay function");
   println!("=========================================================");
-
   let num_steps = 10;
-  for num_iters_per_step in [1024, 2048, 4096, 8192, 16384, 32768, 65536] {
-    // number of iterations of MinRoot per Nova's recursive step
-    let circuit_primary = MinRootCircuit {
-      seq: vec![
-        MinRootIteration {
-          x_i: <G1 as Group>::Scalar::zero(),
-          y_i: <G1 as Group>::Scalar::zero(),
-          x_i_plus_1: <G1 as Group>::Scalar::zero(),
-          y_i_plus_1: <G1 as Group>::Scalar::zero(),
-        };
-        num_iters_per_step
-      ],
-    };
-
-    let circuit_secondary = TrivialCircuit::default();
-
-    println!("Proving {num_iters_per_step} iterations of MinRoot per step");
-
-    // produce public parameters
-    let start = Instant::now();
-    println!("Producing public parameters...");
-    let pp = PublicParams::<
-      G1,
-      G2,
-      MinRootCircuit<<G1 as Group>::Scalar>,
-      TrivialCircuit<<G2 as Group>::Scalar>,
-    >::setup(&circuit_primary, &circuit_secondary);
-    println!("PublicParams::setup, took {:?} ", start.elapsed());
-
-    println!(
-      "Number of constraints per step (primary circuit): {}",
-      pp.num_constraints().0
-    );
-    println!(
-      "Number of constraints per step (secondary circuit): {}",
-      pp.num_constraints().1
-    );
-
-    println!(
-      "Number of variables per step (primary circuit): {}",
-      pp.num_variables().0
-    );
-    println!(
-      "Number of variables per step (secondary circuit): {}",
-      pp.num_variables().1
-    );
-
-    // produce non-deterministic advice
-    let (z0_primary, minroot_iterations) = MinRootIteration::new(
-      num_iters_per_step * num_steps,
-      &<G1 as Group>::Scalar::zero(),
-      &<G1 as Group>::Scalar::one(),
-    );
-    let minroot_circuits = (0..num_steps)
-      .map(|i| MinRootCircuit {
-        seq: (0..num_iters_per_step)
-          .map(|j| MinRootIteration {
-            x_i: minroot_iterations[i * num_iters_per_step + j].x_i,
-            y_i: minroot_iterations[i * num_iters_per_step + j].y_i,
-            x_i_plus_1: minroot_iterations[i * num_iters_per_step + j].x_i_plus_1,
-            y_i_plus_1: minroot_iterations[i * num_iters_per_step + j].y_i_plus_1,
-          })
-          .collect::<Vec<_>>(),
-      })
-      .collect::<Vec<_>>();
-
-    let z0_secondary = vec![<G2 as Group>::Scalar::zero()];
-
-    type C1 = MinRootCircuit<<G1 as Group>::Scalar>;
-    type C2 = TrivialCircuit<<G2 as Group>::Scalar>;
-    // produce a recursive SNARK
-    println!("Generating a RecursiveSNARK...");
-    let mut recursive_snark: RecursiveSNARK<G1, G2, C1, C2> =
-      RecursiveSNARK::<G1, G2, C1, C2>::new(
-        &pp,
-        &minroot_circuits[0],
-        &circuit_secondary,
-        &z0_primary,
-        &z0_secondary,
-      )
-      .unwrap();
-
-    for (i, circuit_primary) in minroot_circuits.iter().take(num_steps).enumerate() {
-      let start = Instant::now();
-      let res = recursive_snark.prove_step(&pp, circuit_primary, &circuit_secondary);
-      assert!(res.is_ok());
-      println!(
-        "RecursiveSNARK::prove_step {}: {:?}, took {:?} ",
-        i,
-        res.is_ok(),
-        start.elapsed()
-      );
-    }
-
-    // verify the recursive SNARK
-    println!("Verifying a RecursiveSNARK...");
-    let start = Instant::now();
-    let res = recursive_snark.verify(&pp, num_steps, &z0_primary, &z0_secondary);
-    println!(
-      "RecursiveSNARK::verify: {:?}, took {:?}",
-      res.is_ok(),
-      start.elapsed()
-    );
-    assert!(res.is_ok());
-
-    // produce a compressed SNARK
-    println!("Generating a CompressedSNARK using Spartan with IPA-PC...");
-    let (pk, vk) = CompressedSNARK::<_, _, _, _, S1, S2>::setup(&pp).unwrap();
-
-    let start = Instant::now();
-    type EE1 = nova_snark::provider::ipa_pc::EvaluationEngine<G1>;
-    type EE2 = nova_snark::provider::ipa_pc::EvaluationEngine<G2>;
-    type S1 = nova_snark::spartan::snark::RelaxedR1CSSNARK<G1, EE1>;
-    type S2 = nova_snark::spartan::snark::RelaxedR1CSSNARK<G2, EE2>;
-
-    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark);
-    println!(
-      "CompressedSNARK::prove: {:?}, took {:?}",
-      res.is_ok(),
-      start.elapsed()
-    );
-    assert!(res.is_ok());
-    let compressed_snark = res.unwrap();
-
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    bincode::serialize_into(&mut encoder, &compressed_snark).unwrap();
-    let compressed_snark_encoded = encoder.finish().unwrap();
-    println!(
-      "CompressedSNARK::len {:?} bytes",
-      compressed_snark_encoded.len()
-    );
-
-    // verify the compressed SNARK
-    println!("Verifying a CompressedSNARK...");
-    let start = Instant::now();
-    let res = compressed_snark.verify(&vk, num_steps, &z0_primary, &z0_secondary);
-    println!(
-      "CompressedSNARK::verify: {:?}, took {:?}",
-      res.is_ok(),
-      start.elapsed()
-    );
-    assert!(res.is_ok());
-    println!("=========================================================");
-  }
+  let num_iters_per_step = 1024;
+  iteration(num_iters_per_step, num_steps);
+  println!("elapsed time: {:?}", start.elapsed());
 }

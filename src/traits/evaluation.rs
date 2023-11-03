@@ -5,6 +5,7 @@ use crate::{
   errors::NovaError,
   traits::{commitment::CommitmentEngineTrait, Group},
 };
+use rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 
 /// A trait that ties different pieces of the commitment evaluation together
@@ -32,6 +33,18 @@ pub trait EvaluationEngineTrait<G: Group>: Clone + Send + Sync {
     poly: &[G::Scalar],
     point: &[G::Scalar],
     eval: &G::Scalar,
+  ) -> Result<Self::EvaluationArgument, NovaError>;
+
+  /// A method to prove the evaluation of a multilinear polynomial (ZK)
+  fn prove_zk(
+    ck: &<<G as Group>::CE as CommitmentEngineTrait<G>>::CommitmentKey,
+    pk: &Self::ProverKey,
+    transcript: &mut G::TE,
+    comm: &<<G as Group>::CE as CommitmentEngineTrait<G>>::Commitment,
+    poly: &[G::Scalar],
+    point: &[G::Scalar],
+    eval: &G::Scalar,
+    rng: impl RngCore,
   ) -> Result<Self::EvaluationArgument, NovaError>;
 
   /// A method to verify the purported evaluation of a multilinear polynomials

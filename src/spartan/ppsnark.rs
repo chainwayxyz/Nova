@@ -32,6 +32,8 @@ use once_cell::sync::OnceCell;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use rand_core::RngCore;
+
 fn vec_to_arr<T, const N: usize>(v: Vec<T>) -> [T; N] {
   v.try_into()
     .unwrap_or_else(|v: Vec<T>| panic!("Expected a Vec of length {} but it was {}", N, v.len()))
@@ -1529,6 +1531,665 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
       &poly_joint.p,
       &r_z,
       &eval_joint,
+    )?;
+
+    Ok(RelaxedR1CSSNARK {
+      comm_Az: comm_Az.compress(),
+      comm_Bz: comm_Bz.compress(),
+      comm_Cz: comm_Cz.compress(),
+      comm_E_row: comm_E_row.compress(),
+      comm_E_col: comm_E_col.compress(),
+      eval_Az_at_tau,
+      eval_Bz_at_tau,
+      eval_Cz_at_tau,
+      comm_output_arr: vec_to_arr(
+        mem_sc_inst
+          .comm_output_vec
+          .iter()
+          .map(|c| c.compress())
+          .collect::<Vec<CompressedCommitment<G>>>(),
+      ),
+      claims_product_arr: vec_to_arr(mem_sc_inst.claims.clone()),
+
+      sc_sat,
+
+      eval_Az,
+      eval_Bz,
+      eval_Cz,
+      eval_E,
+      eval_E_row,
+      eval_E_col,
+      eval_val_A,
+      eval_val_B,
+      eval_val_C,
+
+      eval_left_arr: vec_to_arr(eval_left_vec),
+      eval_right_arr: vec_to_arr(eval_right_vec),
+      eval_output_arr: vec_to_arr(eval_output_vec),
+      eval_input_arr: vec_to_arr(eval_input_vec),
+      eval_output2_arr: vec_to_arr(eval_output2_vec),
+
+      eval_row,
+      eval_row_read_ts,
+      eval_E_row_at_r_prod,
+      eval_row_audit_ts,
+      eval_col,
+      eval_col_read_ts,
+      eval_E_col_at_r_prod,
+      eval_col_audit_ts,
+      eval_W,
+
+      sc_proof_batch,
+      evals_batch_arr: vec_to_arr(claims_batch_left),
+      eval_arg,
+    })
+  }
+
+  /// produces a succinct proof of satisfiability of a `RelaxedR1CS` instance
+  fn prove_zk(
+    ck: &CommitmentKey<G>,
+    pk: &Self::ProverKey,
+    S: &R1CSShape<G>,
+    U: &RelaxedR1CSInstance<G>,
+    W: &RelaxedR1CSWitness<G>,
+    rng: impl RngCore,
+  ) -> Result<Self, NovaError> {
+    // pad the R1CSShape
+    let S = S.pad();
+    // sanity check that R1CSShape has all required size characteristics
+    assert!(S.is_regular_shape());
+
+    let W = W.pad(&S); // pad the witness
+    let mut transcript = G::TE::new(b"RelaxedR1CSSNARK");
+
+    // a list of polynomial evaluation claims that will be batched
+    let mut w_u_vec = Vec::new();
+
+    // append the verifier key (which includes commitment to R1CS matrices) and the RelaxedR1CSInstance to the transcript
+    transcript.absorb(b"vk", &pk.vk_digest);
+    transcript.absorb(b"U", U);
+
+    // compute the full satisfying assignment by concatenating W.W, U.u, and U.X
+    let z = [W.W.clone(), vec![U.u], U.X.clone()].concat();
+
+    // compute Az, Bz, Cz
+    let (mut Az, mut Bz, mut Cz) = S.multiply_vec(&z)?;
+
+    // commit to Az, Bz, Cz
+    let (comm_Az, (comm_Bz, comm_Cz)) = rayon::join(
+      || G::CE::commit(ck, &Az),
+      || rayon::join(|| G::CE::commit(ck, &Bz), || G::CE::commit(ck, &Cz)),
+    );
+
+    transcript.absorb(b"c", &[comm_Az, comm_Bz, comm_Cz].as_slice());
+
+    // number of rounds of the satisfiability sum-check
+    let num_rounds_sat = pk.S_repr.N.log_2();
+    let tau = (0..num_rounds_sat)
+      .map(|_| transcript.squeeze(b"t"))
+      .collect::<Result<Vec<G::Scalar>, NovaError>>()?;
+
+    // (1) send commitments to Az, Bz, and Cz along with their evaluations at tau
+    let (Az, Bz, Cz, E) = {
+      Az.resize(pk.S_repr.N, G::Scalar::ZERO);
+      Bz.resize(pk.S_repr.N, G::Scalar::ZERO);
+      Cz.resize(pk.S_repr.N, G::Scalar::ZERO);
+
+      let E = {
+        let mut val = vec![G::Scalar::ZERO; pk.S_repr.N];
+        for (i, w_e) in W.E.iter().enumerate() {
+          val[i] = *w_e;
+        }
+        val
+      };
+
+      (Az, Bz, Cz, E)
+    };
+    let (eval_Az_at_tau, eval_Bz_at_tau, eval_Cz_at_tau) = {
+      let evals_at_tau = [&Az, &Bz, &Cz]
+        .into_par_iter()
+        .map(|p| MultilinearPolynomial::evaluate_with(p, &tau))
+        .collect::<Vec<G::Scalar>>();
+      (evals_at_tau[0], evals_at_tau[1], evals_at_tau[2])
+    };
+
+    // (2) send commitments to the following two oracles
+    // E_row(i) = eq(tau, row(i)) for all i
+    // E_col(i) = z(col(i)) for all i
+    let (mem_row, mem_col, E_row, E_col) = pk.S_repr.evaluation_oracles(&S, &tau, &z);
+    let (comm_E_row, comm_E_col) =
+      rayon::join(|| G::CE::commit(ck, &E_row), || G::CE::commit(ck, &E_col));
+
+    // absorb the claimed evaluations into the transcript
+    transcript.absorb(
+      b"e",
+      &[eval_Az_at_tau, eval_Bz_at_tau, eval_Cz_at_tau].as_slice(),
+    );
+    // absorb commitments to E_row and E_col in the transcript
+    transcript.absorb(b"e", &vec![comm_E_row, comm_E_col].as_slice());
+
+    // add claims about Az, Bz, and Cz to be checked later
+    // since all the three polynomials are opened at tau,
+    // we can combine them into a single polynomial opened at tau
+    let eval_vec = vec![eval_Az_at_tau, eval_Bz_at_tau, eval_Cz_at_tau];
+    let comm_vec = vec![comm_Az, comm_Bz, comm_Cz];
+    let poly_vec = vec![&Az, &Bz, &Cz];
+    transcript.absorb(b"e", &eval_vec.as_slice()); // c_vec is already in the transcript
+    let c = transcript.squeeze(b"c")?;
+    let w = PolyEvalWitness::batch(&poly_vec, &c);
+    let u = PolyEvalInstance::batch(&comm_vec, &tau, &eval_vec, &c);
+    w_u_vec.push((w, u));
+
+    let c_inner = c;
+
+    // we now need to prove three claims
+    // (1) 0 = \sum_x poly_tau(x) * (poly_Az(x) * poly_Bz(x) - poly_uCz_E(x))
+    // (2) eval_Az_at_tau + r * eval_Bz_at_tau + r^2 * eval_Cz_at_tau = \sum_y E_row(y) * (val_A(y) + r * val_B(y) + r^2 * val_C(y)) * E_col(y)
+    // (3) E_row(i) = eq(tau, row(i)) and E_col(i) = z(col(i))
+
+    // a sum-check instance to prove the first claim
+    let mut outer_sc_inst = OuterSumcheckInstance {
+      poly_tau: MultilinearPolynomial::new(EqPolynomial::new(tau).evals()),
+      poly_Az: MultilinearPolynomial::new(Az.clone()),
+      poly_Bz: MultilinearPolynomial::new(Bz.clone()),
+      poly_uCz_E: {
+        let uCz_E = (0..Cz.len())
+          .map(|i| U.u * Cz[i] + E[i])
+          .collect::<Vec<G::Scalar>>();
+        MultilinearPolynomial::new(uCz_E)
+      },
+    };
+
+    // a sum-check instance to prove the second claim
+    let val = pk
+      .S_repr
+      .val_A
+      .iter()
+      .zip(pk.S_repr.val_B.iter())
+      .zip(pk.S_repr.val_C.iter())
+      .map(|((v_a, v_b), v_c)| *v_a + c_inner * *v_b + c_inner * c_inner * *v_c)
+      .collect::<Vec<G::Scalar>>();
+    let mut inner_sc_inst = InnerSumcheckInstance {
+      claim: eval_Az_at_tau + c_inner * eval_Bz_at_tau + c_inner * c_inner * eval_Cz_at_tau,
+      poly_E_row: MultilinearPolynomial::new(E_row.clone()),
+      poly_E_col: MultilinearPolynomial::new(E_col.clone()),
+      poly_val: MultilinearPolynomial::new(val),
+    };
+
+    // a third sum-check instance to prove the memory-related claim
+    // we now need to prove that E_row and E_col are well-formed
+    // we use memory checking: H(INIT) * H(WS) =? H(RS) * H(FINAL)
+    let gamma_1 = transcript.squeeze(b"g1")?;
+    let gamma_2 = transcript.squeeze(b"g2")?;
+
+    let gamma_1_sqr = gamma_1 * gamma_1;
+    let hash_func = |addr: &G::Scalar, val: &G::Scalar, ts: &G::Scalar| -> G::Scalar {
+      (*ts * gamma_1_sqr + *val * gamma_1 + *addr) - gamma_2
+    };
+
+    let (
+      ((init_row, read_row), (write_row, audit_row)),
+      ((init_col, read_col), (write_col, audit_col)),
+    ) = rayon::join(
+      || {
+        rayon::join(
+          || {
+            rayon::join(
+              || {
+                (0..mem_row.len())
+                  .map(|i| hash_func(&G::Scalar::from(i as u64), &mem_row[i], &G::Scalar::ZERO))
+                  .collect::<Vec<G::Scalar>>()
+              },
+              || {
+                (0..E_row.len())
+                  .map(|i| hash_func(&pk.S_repr.row[i], &E_row[i], &pk.S_repr.row_read_ts[i]))
+                  .collect::<Vec<G::Scalar>>()
+              },
+            )
+          },
+          || {
+            rayon::join(
+              || {
+                (0..E_row.len())
+                  .map(|i| {
+                    hash_func(
+                      &pk.S_repr.row[i],
+                      &E_row[i],
+                      &(pk.S_repr.row_read_ts[i] + G::Scalar::ONE),
+                    )
+                  })
+                  .collect::<Vec<G::Scalar>>()
+              },
+              || {
+                (0..mem_row.len())
+                  .map(|i| {
+                    hash_func(
+                      &G::Scalar::from(i as u64),
+                      &mem_row[i],
+                      &pk.S_repr.row_audit_ts[i],
+                    )
+                  })
+                  .collect::<Vec<G::Scalar>>()
+              },
+            )
+          },
+        )
+      },
+      || {
+        rayon::join(
+          || {
+            rayon::join(
+              || {
+                (0..mem_col.len())
+                  .map(|i| hash_func(&G::Scalar::from(i as u64), &mem_col[i], &G::Scalar::ZERO))
+                  .collect::<Vec<G::Scalar>>()
+              },
+              || {
+                (0..E_col.len())
+                  .map(|i| hash_func(&pk.S_repr.col[i], &E_col[i], &pk.S_repr.col_read_ts[i]))
+                  .collect::<Vec<G::Scalar>>()
+              },
+            )
+          },
+          || {
+            rayon::join(
+              || {
+                (0..E_col.len())
+                  .map(|i| {
+                    hash_func(
+                      &pk.S_repr.col[i],
+                      &E_col[i],
+                      &(pk.S_repr.col_read_ts[i] + G::Scalar::ONE),
+                    )
+                  })
+                  .collect::<Vec<G::Scalar>>()
+              },
+              || {
+                (0..mem_col.len())
+                  .map(|i| {
+                    hash_func(
+                      &G::Scalar::from(i as u64),
+                      &mem_col[i],
+                      &pk.S_repr.col_audit_ts[i],
+                    )
+                  })
+                  .collect::<Vec<G::Scalar>>()
+              },
+            )
+          },
+        )
+      },
+    );
+
+    let mut mem_sc_inst = ProductSumcheckInstance::new(
+      ck,
+      vec![
+        init_row, read_row, write_row, audit_row, init_col, read_col, write_col, audit_col,
+      ],
+      &mut transcript,
+    )?;
+
+    let (sc_sat, r_sat, claims_mem, claims_outer, claims_inner) = Self::prove_inner(
+      &mut mem_sc_inst,
+      &mut outer_sc_inst,
+      &mut inner_sc_inst,
+      &mut transcript,
+    )?;
+
+    // claims[0] is about the Eq polynomial, which the verifier computes directly
+    // claims[1] =? weighed sum of left(rand)
+    // claims[2] =? weighted sum of right(rand)
+    // claims[3] =? weighted sum of output(rand), which is easy to verify by querying output
+    // we also need to prove that output(output.len()-2) = claimed_product
+    let eval_left_vec = claims_mem[1].clone();
+    let eval_right_vec = claims_mem[2].clone();
+    let eval_output_vec = claims_mem[3].clone();
+
+    // claims from the end of sum-check
+    let (eval_Az, eval_Bz): (G::Scalar, G::Scalar) = (claims_outer[0][1], claims_outer[0][2]);
+    let eval_Cz = MultilinearPolynomial::evaluate_with(&Cz, &r_sat);
+    let eval_E = MultilinearPolynomial::evaluate_with(&E, &r_sat);
+    let eval_E_row = claims_inner[0][0];
+    let eval_E_col = claims_inner[0][1];
+    let eval_val_A = MultilinearPolynomial::evaluate_with(&pk.S_repr.val_A, &r_sat);
+    let eval_val_B = MultilinearPolynomial::evaluate_with(&pk.S_repr.val_B, &r_sat);
+    let eval_val_C = MultilinearPolynomial::evaluate_with(&pk.S_repr.val_C, &r_sat);
+    let eval_vec = vec![
+      eval_Az, eval_Bz, eval_Cz, eval_E, eval_E_row, eval_E_col, eval_val_A, eval_val_B, eval_val_C,
+    ]
+    .into_iter()
+    .chain(eval_left_vec.clone())
+    .chain(eval_right_vec.clone())
+    .chain(eval_output_vec.clone())
+    .collect::<Vec<G::Scalar>>();
+
+    // absorb all the claimed evaluations
+    transcript.absorb(b"e", &eval_vec.as_slice());
+
+    // we now combine eval_left = left(rand) and eval_right = right(rand)
+    // into claims about input and output
+    let c = transcript.squeeze(b"c")?;
+
+    // eval = (G::Scalar::ONE - c) * eval_left + c * eval_right
+    // eval is claimed evaluation of input||output(r, c), which can be proven by proving input(r[1..], c) and output(r[1..], c)
+    let rand_ext = {
+      let mut r = r_sat.clone();
+      r.extend(&[c]);
+      r
+    };
+    let eval_input_vec = mem_sc_inst
+      .input_vec
+      .iter()
+      .map(|i| MultilinearPolynomial::evaluate_with(i, &rand_ext[1..]))
+      .collect::<Vec<G::Scalar>>();
+
+    let eval_output2_vec = mem_sc_inst
+      .output_vec
+      .iter()
+      .map(|o| MultilinearPolynomial::evaluate_with(o, &rand_ext[1..]))
+      .collect::<Vec<G::Scalar>>();
+
+    // add claimed evaluations to the transcript
+    let evals = eval_input_vec
+      .clone()
+      .into_iter()
+      .chain(eval_output2_vec.clone())
+      .collect::<Vec<G::Scalar>>();
+    transcript.absorb(b"e", &evals.as_slice());
+
+    // squeeze a challenge to combine multiple claims into one
+    let powers_of_rho = {
+      let s = transcript.squeeze(b"r")?;
+      let mut s_vec = vec![s];
+      for i in 1..mem_sc_inst.initial_claims().len() {
+        s_vec.push(s_vec[i - 1] * s);
+      }
+      s_vec
+    };
+
+    // take weighted sum of input, output, and their commitments
+    let product = mem_sc_inst
+      .claims
+      .iter()
+      .zip(powers_of_rho.iter())
+      .map(|(e, p)| *e * p)
+      .sum();
+
+    let eval_output = eval_output_vec
+      .iter()
+      .zip(powers_of_rho.iter())
+      .map(|(e, p)| *e * p)
+      .sum();
+
+    let comm_output = mem_sc_inst
+      .comm_output_vec
+      .iter()
+      .zip(powers_of_rho.iter())
+      .map(|(c, r_i)| *c * *r_i)
+      .fold(Commitment::<G>::default(), |acc, item| acc + item);
+
+    let weighted_sum = |W: &[Vec<G::Scalar>], s: &[G::Scalar]| -> Vec<G::Scalar> {
+      assert_eq!(W.len(), s.len());
+      let mut p = vec![G::Scalar::ZERO; W[0].len()];
+      for i in 0..W.len() {
+        for (j, item) in W[i].iter().enumerate().take(W[i].len()) {
+          p[j] += *item * s[i]
+        }
+      }
+      p
+    };
+
+    let poly_output = weighted_sum(&mem_sc_inst.output_vec, &powers_of_rho);
+
+    let eval_output2 = eval_output2_vec
+      .iter()
+      .zip(powers_of_rho.iter())
+      .map(|(e, p)| *e * p)
+      .sum();
+
+    // eval_output = output(r_sat)
+    w_u_vec.push((
+      PolyEvalWitness {
+        p: poly_output.clone(),
+      },
+      PolyEvalInstance {
+        c: comm_output,
+        x: r_sat.clone(),
+        e: eval_output,
+      },
+    ));
+
+    // claimed_product = output(1, ..., 1, 0)
+    let x = {
+      let mut x = vec![G::Scalar::ONE; r_sat.len()];
+      x[r_sat.len() - 1] = G::Scalar::ZERO;
+      x
+    };
+    w_u_vec.push((
+      PolyEvalWitness {
+        p: poly_output.clone(),
+      },
+      PolyEvalInstance {
+        c: comm_output,
+        x,
+        e: product,
+      },
+    ));
+
+    // eval_output2 = output(rand_ext[1..])
+    w_u_vec.push((
+      PolyEvalWitness { p: poly_output },
+      PolyEvalInstance {
+        c: comm_output,
+        x: rand_ext[1..].to_vec(),
+        e: eval_output2,
+      },
+    ));
+
+    let r_prod = rand_ext[1..].to_vec();
+    // row-related and col-related claims of polynomial evaluations to aid the final check of the sum-check
+    let evals = [
+      &pk.S_repr.row,
+      &pk.S_repr.row_read_ts,
+      &E_row,
+      &pk.S_repr.row_audit_ts,
+      &pk.S_repr.col,
+      &pk.S_repr.col_read_ts,
+      &E_col,
+      &pk.S_repr.col_audit_ts,
+    ]
+    .into_par_iter()
+    .map(|p| MultilinearPolynomial::evaluate_with(p, &r_prod))
+    .collect::<Vec<G::Scalar>>();
+
+    let eval_row = evals[0];
+    let eval_row_read_ts = evals[1];
+    let eval_E_row_at_r_prod = evals[2];
+    let eval_row_audit_ts = evals[3];
+    let eval_col = evals[4];
+    let eval_col_read_ts = evals[5];
+    let eval_E_col_at_r_prod = evals[6];
+    let eval_col_audit_ts = evals[7];
+
+    // we need to prove that eval_z = z(r_prod) = (1-r_prod[0]) * W.w(r_prod[1..]) + r_prod[0] * U.x(r_prod[1..]).
+    // r_prod was padded, so we now remove the padding
+    let r_prod_unpad = {
+      let l = pk.S_repr.N.log_2() - (2 * S.num_vars).log_2();
+      r_prod[l..].to_vec()
+    };
+
+    let eval_W = MultilinearPolynomial::evaluate_with(&W.W, &r_prod_unpad[1..]);
+
+    // we can batch all the claims
+    transcript.absorb(
+      b"e",
+      &[
+        eval_row,
+        eval_row_read_ts,
+        eval_E_row_at_r_prod,
+        eval_row_audit_ts,
+        eval_col,
+        eval_col_read_ts,
+        eval_E_col_at_r_prod,
+        eval_col_audit_ts,
+        eval_W, // this will not be batched below as it is evaluated at r_prod[1..]
+      ]
+      .as_slice(),
+    );
+
+    let c = transcript.squeeze(b"c")?;
+    let eval_vec = [
+      eval_row,
+      eval_row_read_ts,
+      eval_E_row_at_r_prod,
+      eval_row_audit_ts,
+      eval_col,
+      eval_col_read_ts,
+      eval_E_col_at_r_prod,
+      eval_col_audit_ts,
+    ];
+    let comm_vec = [
+      pk.S_comm.comm_row,
+      pk.S_comm.comm_row_read_ts,
+      comm_E_row,
+      pk.S_comm.comm_row_audit_ts,
+      pk.S_comm.comm_col,
+      pk.S_comm.comm_col_read_ts,
+      comm_E_col,
+      pk.S_comm.comm_col_audit_ts,
+    ];
+    let poly_vec = [
+      &pk.S_repr.row,
+      &pk.S_repr.row_read_ts,
+      &E_row,
+      &pk.S_repr.row_audit_ts,
+      &pk.S_repr.col,
+      &pk.S_repr.col_read_ts,
+      &E_col,
+      &pk.S_repr.col_audit_ts,
+    ];
+    let w = PolyEvalWitness::batch(&poly_vec, &c);
+    let u = PolyEvalInstance::batch(&comm_vec, &r_prod, &eval_vec, &c);
+
+    // add the claim to prove for later
+    w_u_vec.push((w, u));
+
+    w_u_vec.push((
+      PolyEvalWitness { p: W.W },
+      PolyEvalInstance {
+        c: U.comm_W,
+        x: r_prod_unpad[1..].to_vec(),
+        e: eval_W,
+      },
+    ));
+
+    // all nine evaluations are at r_sat, we can fold them into one; they were added to the transcript earlier
+    let eval_vec = [
+      eval_Az, eval_Bz, eval_Cz, eval_E, eval_E_row, eval_E_col, eval_val_A, eval_val_B, eval_val_C,
+    ];
+    let comm_vec = [
+      comm_Az,
+      comm_Bz,
+      comm_Cz,
+      U.comm_E,
+      comm_E_row,
+      comm_E_col,
+      pk.S_comm.comm_val_A,
+      pk.S_comm.comm_val_B,
+      pk.S_comm.comm_val_C,
+    ];
+    let poly_vec = [
+      &Az,
+      &Bz,
+      &Cz,
+      &E,
+      &E_row,
+      &E_col,
+      &pk.S_repr.val_A,
+      &pk.S_repr.val_B,
+      &pk.S_repr.val_C,
+    ];
+    transcript.absorb(b"e", &eval_vec.as_slice()); // c_vec is already in the transcript
+    let c = transcript.squeeze(b"c")?;
+    let w = PolyEvalWitness::batch(&poly_vec, &c);
+    let u = PolyEvalInstance::batch(&comm_vec, &r_sat, &eval_vec, &c);
+    w_u_vec.push((w, u));
+
+    // We will now reduce a vector of claims of evaluations at different points into claims about them at the same point.
+    // For example, eval_W =? W(r_y[1..]) and eval_W =? E(r_x) into
+    // two claims: eval_W_prime =? W(rz) and eval_E_prime =? E(rz)
+    // We can them combine the two into one: eval_W_prime + gamma * eval_E_prime =? (W + gamma*E)(rz),
+    // where gamma is a public challenge
+    // Since commitments to W and E are homomorphic, the verifier can compute a commitment
+    // to the batched polynomial.
+    assert!(w_u_vec.len() >= 2);
+
+    let (w_vec, u_vec): (Vec<PolyEvalWitness<G>>, Vec<PolyEvalInstance<G>>) =
+      w_u_vec.into_iter().unzip();
+    let w_vec_padded = PolyEvalWitness::pad(&w_vec); // pad the polynomials to be of the same size
+    let u_vec_padded = PolyEvalInstance::pad(&u_vec); // pad the evaluation points
+
+    // generate a challenge
+    let rho = transcript.squeeze(b"r")?;
+    let num_claims = w_vec_padded.len();
+    let powers_of_rho = powers::<G>(&rho, num_claims);
+    let claim_batch_joint = u_vec_padded
+      .iter()
+      .zip(powers_of_rho.iter())
+      .map(|(u, p)| u.e * p)
+      .sum();
+
+    let mut polys_left: Vec<MultilinearPolynomial<G::Scalar>> = w_vec_padded
+      .iter()
+      .map(|w| MultilinearPolynomial::new(w.p.clone()))
+      .collect();
+    let mut polys_right: Vec<MultilinearPolynomial<G::Scalar>> = u_vec_padded
+      .iter()
+      .map(|u| MultilinearPolynomial::new(EqPolynomial::new(u.x.clone()).evals()))
+      .collect();
+
+    let num_rounds_z = u_vec_padded[0].x.len();
+    let comb_func = |poly_A_comp: &G::Scalar, poly_B_comp: &G::Scalar| -> G::Scalar {
+      *poly_A_comp * *poly_B_comp
+    };
+    let (sc_proof_batch, r_z, claims_batch) = SumcheckProof::prove_quad_batch(
+      &claim_batch_joint,
+      num_rounds_z,
+      &mut polys_left,
+      &mut polys_right,
+      &powers_of_rho,
+      comb_func,
+      &mut transcript,
+    )?;
+
+    let (claims_batch_left, _): (Vec<G::Scalar>, Vec<G::Scalar>) = claims_batch;
+
+    transcript.absorb(b"l", &claims_batch_left.as_slice());
+
+    // we now combine evaluation claims at the same point rz into one
+    let gamma = transcript.squeeze(b"g")?;
+    let powers_of_gamma: Vec<G::Scalar> = powers::<G>(&gamma, num_claims);
+    let comm_joint = u_vec_padded
+      .iter()
+      .zip(powers_of_gamma.iter())
+      .map(|(u, g_i)| u.c * *g_i)
+      .fold(Commitment::<G>::default(), |acc, item| acc + item);
+    let poly_joint = PolyEvalWitness::weighted_sum(&w_vec_padded, &powers_of_gamma);
+    let eval_joint = claims_batch_left
+      .iter()
+      .zip(powers_of_gamma.iter())
+      .map(|(e, g_i)| *e * *g_i)
+      .sum();
+
+    let eval_arg = EE::prove_zk(
+      ck,
+      &pk.pk_ee,
+      &mut transcript,
+      &comm_joint,
+      &poly_joint.p,
+      &r_z,
+      &eval_joint,
+      rng,
     )?;
 
     Ok(RelaxedR1CSSNARK {

@@ -15,6 +15,7 @@ use ff::Field;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
+use rand_core::RngCore;
 
 /// Provides an implementation of the prover key
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -73,6 +74,22 @@ where
     let w = InnerProductWitness::new(poly);
 
     InnerProductArgument::prove(ck, &pk.ck_s, &u, &w, transcript)
+  }
+
+  fn prove_zk(
+    ck: &CommitmentKey<G>,
+    pk: &Self::ProverKey,
+    transcript: &mut G::TE,
+    comm: &Commitment<G>,
+    poly: &[G::Scalar],
+    point: &[G::Scalar],
+    eval: &G::Scalar,
+    rng: impl RngCore,
+  ) -> Result<Self::EvaluationArgument, NovaError> {
+    let u = InnerProductInstance::new(comm, &EqPolynomial::new(point.to_vec()).evals(), eval);
+    let w = InnerProductWitness::new(poly);
+
+    InnerProductArgument::prove_zk(ck, &pk.ck_s, &u, &w, transcript, rng)
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
@@ -176,6 +193,124 @@ where
     transcript: &mut G::TE,
   ) -> Result<Self, NovaError> {
     transcript.dom_sep(Self::protocol_name());
+
+    let (ck, _) = ck.split_at(U.b_vec.len());
+
+    if U.b_vec.len() != W.a_vec.len() {
+      return Err(NovaError::InvalidInputLength);
+    }
+
+    // absorb the instance in the transcript
+    transcript.absorb(b"U", U);
+
+    // sample a random base for committing to the inner product
+    let r = transcript.squeeze(b"r")?;
+    let ck_c = ck_c.scale(&r);
+
+    // a closure that executes a step of the recursive inner product argument
+    let prove_inner = |a_vec: &[G::Scalar],
+                       b_vec: &[G::Scalar],
+                       ck: &CommitmentKey<G>,
+                       transcript: &mut G::TE|
+     -> Result<
+      (
+        CompressedCommitment<G>,
+        CompressedCommitment<G>,
+        Vec<G::Scalar>,
+        Vec<G::Scalar>,
+        CommitmentKey<G>,
+      ),
+      NovaError,
+    > {
+      let n = a_vec.len();
+      let (ck_L, ck_R) = ck.split_at(n / 2);
+
+      let c_L = inner_product(&a_vec[0..n / 2], &b_vec[n / 2..n]);
+      let c_R = inner_product(&a_vec[n / 2..n], &b_vec[0..n / 2]);
+
+      let L = CE::<G>::commit(
+        &ck_R.combine(&ck_c),
+        &a_vec[0..n / 2]
+          .iter()
+          .chain(iter::once(&c_L))
+          .copied()
+          .collect::<Vec<G::Scalar>>(),
+      )
+      .compress();
+      let R = CE::<G>::commit(
+        &ck_L.combine(&ck_c),
+        &a_vec[n / 2..n]
+          .iter()
+          .chain(iter::once(&c_R))
+          .copied()
+          .collect::<Vec<G::Scalar>>(),
+      )
+      .compress();
+
+      transcript.absorb(b"L", &L);
+      transcript.absorb(b"R", &R);
+
+      let r = transcript.squeeze(b"r")?;
+      let r_inverse = r.invert().unwrap();
+
+      // fold the left half and the right half
+      let a_vec_folded = a_vec[0..n / 2]
+        .par_iter()
+        .zip(a_vec[n / 2..n].par_iter())
+        .map(|(a_L, a_R)| *a_L * r + r_inverse * *a_R)
+        .collect::<Vec<G::Scalar>>();
+
+      let b_vec_folded = b_vec[0..n / 2]
+        .par_iter()
+        .zip(b_vec[n / 2..n].par_iter())
+        .map(|(b_L, b_R)| *b_L * r_inverse + r * *b_R)
+        .collect::<Vec<G::Scalar>>();
+
+      let ck_folded = ck.fold(&r_inverse, &r);
+
+      Ok((L, R, a_vec_folded, b_vec_folded, ck_folded))
+    };
+
+    // two vectors to hold the logarithmic number of group elements
+    let mut L_vec: Vec<CompressedCommitment<G>> = Vec::new();
+    let mut R_vec: Vec<CompressedCommitment<G>> = Vec::new();
+
+    // we create mutable copies of vectors and generators
+    let mut a_vec = W.a_vec.to_vec();
+    let mut b_vec = U.b_vec.to_vec();
+    let mut ck = ck;
+    for _i in 0..usize::try_from(U.b_vec.len().ilog2()).unwrap() {
+      let (L, R, a_vec_folded, b_vec_folded, ck_folded) =
+        prove_inner(&a_vec, &b_vec, &ck, transcript)?;
+      L_vec.push(L);
+      R_vec.push(R);
+
+      a_vec = a_vec_folded;
+      b_vec = b_vec_folded;
+      ck = ck_folded;
+    }
+
+    Ok(InnerProductArgument {
+      L_vec,
+      R_vec,
+      a_hat: a_vec[0],
+    })
+  }
+
+  fn prove_zk(
+    ck: &CommitmentKey<G>,
+    ck_c: &CommitmentKey<G>,
+    U: &InnerProductInstance<G>,
+    W: &InnerProductWitness<G>,
+    transcript: &mut G::TE,
+    mut rng: impl RngCore,
+  ) -> Result<Self, NovaError> {
+    transcript.dom_sep(Self::protocol_name());
+
+    let mut s_poly = W.a_vec.clone();
+    for coeff in s_poly.iter_mut() {
+      *coeff = G::Scalar::random(&mut rng);
+    }
 
     let (ck, _) = ck.split_at(U.b_vec.len());
 
