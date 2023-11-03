@@ -320,7 +320,7 @@ where
     let r = transcript.squeeze(b"r")?;
     let ck_c = ck_c.scale(&r);
 
-    let P = U.comm_a_vec + CE::<G>::open(&ck_c, &[U.c]);
+    let P = U.comm_a_vec + CE::<G>::commit(&ck_c, &[U.c]);
 
     let batch_invert = |v: &[G::Scalar]| -> Result<Vec<G::Scalar>, NovaError> {
       let mut products = vec![G::Scalar::ZERO; v.len()];
@@ -387,7 +387,7 @@ where
     };
 
     let ck_hat = {
-      let c = CE::<G>::open(&ck, &s).compress();
+      let c = CE::<G>::commit(&ck, &s).compress();
       CommitmentKey::<G>::reinterpret_commitments_as_ck(&[c])?
     };
 
@@ -401,7 +401,7 @@ where
         ck_L.combine(&ck_R).combine(&ck_P)
       };
 
-      CE::<G>::open(
+      CE::<G>::commit(
         &ck_folded,
         &r_square
           .iter()
@@ -412,7 +412,7 @@ where
       )
     };
 
-    if P_hat == CE::<G>::open(&ck_hat.combine(&ck_c), &[self.a_hat, self.a_hat * b_hat]) {
+    if P_hat == CE::<G>::commit(&ck_hat.combine(&ck_c), &[self.a_hat, self.a_hat * b_hat]) {
       Ok(())
     } else {
       Err(NovaError::InvalidIPA)

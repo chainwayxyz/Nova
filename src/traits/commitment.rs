@@ -86,8 +86,8 @@ pub trait CommitmentEngineTrait<G: Group>: Clone + Send + Sync {
   fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment;
 
   /// Commits to the provided vector using the provided generators
-  fn commit_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], rnd:G::Scalar) -> Self::Commitment;
+  fn commit_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], rnd: G::Scalar) -> Self::Commitment;
 
   /// Opens the commitment at the provided index
-  fn open(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment;
+  fn open_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], bv: G) -> Self::Commitment;
 }

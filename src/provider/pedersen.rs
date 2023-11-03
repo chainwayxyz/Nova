@@ -12,6 +12,7 @@ use core::{
   ops::{Add, AddAssign, Mul, MulAssign},
 };
 use ff::Field;
+// use proptest::{num::f32::NORMAL, result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +49,7 @@ impl<G: Group> CommitmentKey<G> {
 #[serde(bound = "")]
 pub struct Commitment<G: Group> {
   pub(crate) comm: G,
+  pub(crate) blind: G,
 }
 
 /// A type that holds a compressed commitment
@@ -77,13 +79,14 @@ impl<G: Group> CommitmentTrait<G> for Commitment<G> {
     }
     Ok(Commitment {
       comm: comm.unwrap(),
+      blind: G::zero(),
     })
   }
 }
 
 impl<G: Group> Default for Commitment<G> {
   fn default() -> Self {
-    Commitment { comm: G::zero() }
+    Commitment { comm: G::zero(), blind: G::zero() }
   }
 }
 
@@ -121,8 +124,9 @@ impl<G: Group> TranscriptReprTrait<G> for CompressedCommitment<G> {
 
 impl<G: Group> MulAssign<G::Scalar> for Commitment<G> {
   fn mul_assign(&mut self, scalar: G::Scalar) {
-    let result = (self as &Commitment<G>).comm * scalar;
-    *self = Commitment { comm: result };
+    let result_comm = (self as &Commitment<G>).comm * scalar;
+    let result_blind = (self as &Commitment<G>).blind * scalar;
+    *self = Commitment { comm: result_comm, blind: result_blind };
   }
 }
 
@@ -131,6 +135,7 @@ impl<'a, 'b, G: Group> Mul<&'b G::Scalar> for &'a Commitment<G> {
   fn mul(self, scalar: &'b G::Scalar) -> Commitment<G> {
     Commitment {
       comm: self.comm * scalar,
+      blind: self.blind * scalar,
     }
   }
 }
@@ -141,14 +146,16 @@ impl<G: Group> Mul<G::Scalar> for Commitment<G> {
   fn mul(self, scalar: G::Scalar) -> Commitment<G> {
     Commitment {
       comm: self.comm * scalar,
+      blind: self.blind * scalar,
     }
   }
 }
 
 impl<'b, G: Group> AddAssign<&'b Commitment<G>> for Commitment<G> {
   fn add_assign(&mut self, other: &'b Commitment<G>) {
-    let result = (self as &Commitment<G>).comm + other.comm;
-    *self = Commitment { comm: result };
+    let result_comm = (self as &Commitment<G>).comm + other.comm;
+    let result_blind = (self as &Commitment<G>).blind + other.blind;
+    *self = Commitment { comm: result_comm, blind: result_blind };
   }
 }
 
@@ -157,6 +164,7 @@ impl<'a, 'b, G: Group> Add<&'b Commitment<G>> for &'a Commitment<G> {
   fn add(self, other: &'b Commitment<G>) -> Commitment<G> {
     Commitment {
       comm: self.comm + other.comm,
+      blind: self.blind + other.blind,
     }
   }
 }
@@ -219,28 +227,44 @@ impl<G: Group> CommitmentEngineTrait<G> for CommitmentEngine<G> {
     assert!(ck.ck.len() >= v.len());
     Commitment {
       comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
+      blind: G::zero(),
     }
   }
 
   fn commit_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], rnd: G::Scalar) -> Self::Commitment {
     assert!(ck.ck.len() >= v.len());
-    let mut tmp_scalars = Vec::with_capacity(v.len() + 1);
-    tmp_scalars.extend(v.iter());
-    tmp_scalars.push(rnd);
-    //create v_new as a slice from tmp_scalars
-    let v_new = &tmp_scalars[..];
+    // let mut tmp_scalars = Vec::with_capacity(v.len() + 1);
+    // tmp_scalars.extend(v.iter());
+    // tmp_scalars.push(rnd);
+    // //create v_new as a slice from tmp_scalars
+    // let v_new = &tmp_scalars[..];
+    let generator = G::get_generator();
+    let blind = generator.mul(rnd);
     Commitment {
-      comm: G::vartime_multiscalar_mul(v_new, &ck.ck[..v.len() + 1]),
+      comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]).add(generator.mul(rnd)),
+      blind: blind,
     }
   }
 
-  fn open(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment {
+  fn open_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], bv: G) -> Self::Commitment {
     assert!(ck.ck.len() >= v.len());
+    // let mut tmp_scalars = Vec::with_capacity(v.len() + 1);
+    // tmp_scalars.extend(v.iter());
+    // // tmp_scalars.push(rnd);
+    // let v_new = &tmp_scalars[..];
+    // //copy ck.ck into a new vector and append bv to it
+    // let mut tmp_ck = Vec::with_capacity(ck.ck.len() + 1);
+    // tmp_ck.extend(ck.ck.iter());
+    // let mut bv_cpy = bv.preprocessed();
+    // tmp_ck.push(&bv_cpy);
+    // //create ck_new as a slice from tmp_ck as an argument to vartime_multiscalar_mul
+    // let ck_new = &tmp_ck[..];
+
     Commitment {
-      comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
+      comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]).add(bv),
+      blind: bv,
     }
   }
-
 }
 
 
