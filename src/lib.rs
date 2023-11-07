@@ -721,10 +721,11 @@ where
     z0_secondary: &[G2::Scalar],
   ) -> Result<(Vec<G1::Scalar>, Vec<G2::Scalar>), NovaError> {
     // number of steps cannot be zero
+    println!("DEBUG: num_steps: {}", num_steps);
     if num_steps == 0 {
       return Err(NovaError::ProofVerifyError);
     }
-
+    println!("DEBUG: checking public outputs length...");
     // check if the (relaxed) R1CS instances have two public outputs
     if self.l_u_secondary.X.len() != 2
       || self.r_U_primary.X.len() != 2
@@ -732,7 +733,7 @@ where
     {
       return Err(NovaError::ProofVerifyError);
     }
-
+    println!("DEBUG: checking hash values...");
     // check if the output hashes in R1CS instances point to the right running instances
     let (hash_primary, hash_secondary) = {
       let mut hasher = <G2 as Group>::RO::new(
@@ -774,7 +775,7 @@ where
     {
       return Err(NovaError::ProofVerifyError);
     }
-
+    println!("DEBUG: checking satisfiability...");
     // fold the running instance and last instance to get a folded instance
     let f_U_secondary = self.nifs_secondary.verify(
       &vk.ro_consts_secondary,

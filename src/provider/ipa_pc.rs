@@ -159,6 +159,8 @@ pub struct InnerProductArgument<G: Group> {
   L_vec: Vec<CompressedCommitment<G>>,
   R_vec: Vec<CompressedCommitment<G>>,
   a_hat: G::Scalar,
+  a_comm: Commitment<G>,
+  w_prime: G::Scalar,
 }
 
 impl<G> InnerProductArgument<G>
@@ -186,11 +188,47 @@ where
       return Err(NovaError::InvalidInputLength);
     }
 
-    // Sample a random polynomial (of same degree) that has a root at point, first
-    // by setting all coefficients to random values.
-    let mut sample_rand_poly = (W.a_vec).clone();
-    for coeff in sample_rand_poly.iter_mut() {
-        *coeff = G::Scalar::random(&mut _rng);
+    let (ck, _) = ck.split_at(U.b_vec.len() + 1);
+
+    if U.b_vec.len() != W.a_vec.len() {
+      return Err(NovaError::InvalidInputLength);
+    }
+
+    let mut s_poly = W.a_vec.clone();
+    for coeff in s_poly.iter_mut() {
+      *coeff = G::Scalar::random(&mut _rng);
+    }
+
+    let (ck, _) = ck.split_at(U.b_vec.len());
+    let eval_polynomial = |poly: &[G::Scalar], point: G::Scalar| -> G::Scalar {
+      poly.iter().rev().fold(G::Scalar::ZERO, |acc, coeff| acc * point + coeff)
+    };
+
+    let s_at_z = eval_polynomial(&s_poly, U.b_vec[1]);
+    s_poly[0] -= &s_at_z;
+    let s_poly_blind = G::Scalar::random(&mut _rng);
+
+    let mut vw = s_poly.to_vec();
+    vw.push(s_poly_blind);
+
+    let s_poly_commitment = CE::<G>::commit(&ck, &vw);
+
+    let (ck, s) = ck.split_at(U.b_vec.len());
+
+    let comm_a = CommitmentKey::<G>::reinterpret_commitments_as_ck(&[U.comm_a_vec.compress()])?;
+    let comm_s = CommitmentKey::<G>::reinterpret_commitments_as_ck(&[s_poly_commitment.compress()])?;
+
+    let alpha: G::Scalar = transcript.squeeze(b"alpha")?;
+    let w = G::Scalar::random(&mut _rng);
+    let w_prime = w + s_poly_blind * alpha;
+    let _p_prime = W.a_vec.iter().zip(s_poly).map(|(a, s)| *a + alpha * s).collect::<Vec<G::Scalar>>();
+
+    //let _comm_prime = comm_a + alpha * comm_s - s * w_prime;
+
+    let _comm_prime = CE::<G>::commit(&comm_a.combine(&comm_s).combine(&s), &[G::Scalar::ONE, alpha, -w_prime]);
+
+    if U.b_vec.len() != W.a_vec.len() {
+      return Err(NovaError::InvalidInputLength);
     }
 
     // absorb the instance in the transcript
@@ -200,7 +238,7 @@ where
     // sample a random base for committing to the inner product
     let r = transcript.squeeze(b"r")?;
     let ck_c = ck_c.scale(&r);
-    let rnd = G::Scalar::random(&mut _rng);
+    // let rnd = G::Scalar::random(&mut _rng);
 
     // a closure that executes a step of the recursive inner product argument
     let prove_inner = |a_vec: &[G::Scalar],
@@ -223,24 +261,22 @@ where
       let c_L = inner_product(&a_vec[0..n / 2], &b_vec[n / 2..n]);
       let c_R = inner_product(&a_vec[n / 2..n], &b_vec[0..n / 2]);
 
-      let L = CE::<G>::commit_zk(
+      let L = CE::<G>::commit(
         &ck_R.combine(&ck_c),
         &a_vec[0..n / 2]
           .iter()
           .chain(iter::once(&c_L))
           .copied()
           .collect::<Vec<G::Scalar>>(),
-        rnd,
       )
       .compress();
-      let R = CE::<G>::commit_zk(
+      let R = CE::<G>::commit(
         &ck_L.combine(&ck_c),
         &a_vec[n / 2..n]
           .iter()
           .chain(iter::once(&c_R))
           .copied()
           .collect::<Vec<G::Scalar>>(),
-        rnd,
       )
       .compress();
 
@@ -273,7 +309,7 @@ where
     let mut R_vec: Vec<CompressedCommitment<G>> = Vec::new();
 
     // we create mutable copies of vectors and generators
-    let mut a_vec = W.a_vec.to_vec();
+    let mut a_vec = _p_prime.to_vec();
     let mut b_vec = U.b_vec.to_vec();
     let mut ck = ck;
     for _i in 0..usize::try_from(U.b_vec.len().ilog2()).unwrap() {
@@ -291,6 +327,8 @@ where
       L_vec,
       R_vec,
       a_hat: a_vec[0],
+      a_comm: s_poly_commitment,
+      w_prime: w_prime,
     })
   }
 
@@ -320,7 +358,9 @@ where
     let r = transcript.squeeze(b"r")?;
     let ck_c = ck_c.scale(&r);
 
-    let P = U.comm_a_vec + CE::<G>::commit(&ck_c, &[U.c]);
+    let alpha = transcript.squeeze(b"alpha")?;
+
+    let P = U.comm_a_vec + CE::<G>::commit(&ck_c, &[U.c]) + alpha * U.a_comm - G::get_generator() * self.w_prime;
 
     let batch_invert = |v: &[G::Scalar]| -> Result<Vec<G::Scalar>, NovaError> {
       let mut products = vec![G::Scalar::ZERO; v.len()];
