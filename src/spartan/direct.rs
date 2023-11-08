@@ -20,6 +20,7 @@ use bellpepper_core::{num::AllocatedNum, Circuit, ConstraintSystem, SynthesisErr
 use core::marker::PhantomData;
 use ff::Field;
 use serde::{Deserialize, Serialize};
+use rand_core::RngCore;
 
 struct DirectCircuit<G: Group, SC: StepCircuit<G::Scalar>> {
   z_i: Option<Vec<G::Scalar>>, // inputs to the circuit
@@ -102,7 +103,7 @@ where
 
 impl<G: Group, S: RelaxedR1CSSNARKTrait<G>, C: StepCircuit<G::Scalar>> DirectSNARK<G, S, C> {
   /// Produces prover and verifier keys for the direct SNARK
-  pub fn setup(sc: C) -> Result<(ProverKey<G, S>, VerifierKey<G, S>), NovaError> {
+  pub fn setup(sc: C, mut rng: impl RngCore) -> Result<(ProverKey<G, S>, VerifierKey<G, S>), NovaError> {
     // construct a circuit that can be synthesized
     let circuit: DirectCircuit<G, C> = DirectCircuit { z_i: None, sc };
 
@@ -110,7 +111,7 @@ impl<G: Group, S: RelaxedR1CSSNARKTrait<G>, C: StepCircuit<G::Scalar>> DirectSNA
     let _ = circuit.synthesize(&mut cs);
     let (shape, ck) = cs.r1cs_shape();
 
-    let (pk, vk) = S::setup(&ck, &shape)?;
+    let (pk, vk, _) = S::setup(&ck, &shape, &mut rng)?;
 
     let pk = ProverKey { S: shape, ck, pk };
 
@@ -247,9 +248,11 @@ mod tests {
   fn test_direct_snark_with<G: Group, S: RelaxedR1CSSNARKTrait<G>>() {
     let circuit = CubicCircuit::default();
 
+    let rng = &mut rand::thread_rng();
+
     // produce keys
     let (pk, vk) =
-      DirectSNARK::<G, S, CubicCircuit<<G as Group>::Scalar>>::setup(circuit.clone()).unwrap();
+      DirectSNARK::<G, S, CubicCircuit<<G as Group>::Scalar>>::setup(circuit.clone(), rng).unwrap();
 
     let num_steps = 3;
 

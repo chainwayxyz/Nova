@@ -23,6 +23,7 @@ use crate::{
 };
 use ff::Field;
 use once_cell::sync::OnceCell;
+use rand_core::RngCore;
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,7 @@ use serde::{Deserialize, Serialize};
 pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G>> {
   pk_ee: EE::ProverKey,
   vk_digest: G::Scalar, // digest of the verifier's key
+  r_gn: G::PreprocessedGroupElement,
 }
 
 /// A type that represents the verifier's key
@@ -43,16 +45,18 @@ pub struct VerifierKey<G: Group, EE: EvaluationEngineTrait<G>> {
   S: R1CSShape<G>,
   #[serde(skip, default = "OnceCell::new")]
   digest: OnceCell<G::Scalar>,
+  r_gn: G::PreprocessedGroupElement,
 }
 
 impl<G: Group, EE: EvaluationEngineTrait<G>> SimpleDigestible for VerifierKey<G, EE> {}
 
 impl<G: Group, EE: EvaluationEngineTrait<G>> VerifierKey<G, EE> {
-  fn new(shape: R1CSShape<G>, vk_ee: EE::VerifierKey) -> Self {
+  fn new(shape: R1CSShape<G>, vk_ee: EE::VerifierKey, r_gn: G::PreprocessedGroupElement) -> Self {
     VerifierKey {
       vk_ee,
       S: shape,
       digest: OnceCell::new(),
+      r_gn,
     }
   }
 }
@@ -90,23 +94,29 @@ pub struct RelaxedR1CSSNARK<G: Group, EE: EvaluationEngineTrait<G>> {
 impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for RelaxedR1CSSNARK<G, EE> {
   type ProverKey = ProverKey<G, EE>;
   type VerifierKey = VerifierKey<G, EE>;
+  type RandomPoint = EE::RandomPoint;
 
   fn setup(
     ck: &CommitmentKey<G>,
     S: &R1CSShape<G>,
-  ) -> Result<(Self::ProverKey, Self::VerifierKey), NovaError> {
-    let (pk_ee, vk_ee) = EE::setup(ck);
+    mut rng: impl RngCore,
+  ) -> Result<(Self::ProverKey, Self::VerifierKey, G::PreprocessedGroupElement), NovaError> {
+    let r = G::Scalar::random(&mut rng);
+    let gn = G::get_generator().preprocessed();
+    let r_gn = G::vartime_multiscalar_mul(&[r], &[gn]).preprocessed();
+    let (pk_ee, vk_ee, r_gn) = EE::setup(ck, r_gn);
 
     let S = S.pad();
 
-    let vk: VerifierKey<G, EE> = VerifierKey::new(S, vk_ee);
+    let vk: VerifierKey<G, EE> = VerifierKey::new(S, vk_ee, r_gn.clone());
 
     let pk = ProverKey {
       pk_ee,
       vk_digest: vk.digest(),
+      r_gn: r_gn.clone(),
     };
 
-    Ok((pk, vk))
+    Ok((pk, vk, r_gn))
   }
 
   /// produces a succinct proof of satisfiability of a `RelaxedR1CS` instance
@@ -350,6 +360,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
       &poly_joint.p,
       &r_z,
       &eval_joint,
+      &pk.r_gn,
     )?;
 
     Ok(RelaxedR1CSSNARK {
@@ -546,6 +557,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
       &r_z,
       &eval_joint,
       &self.eval_arg,
+      &vk.r_gn,
     )?;
 
     Ok(())

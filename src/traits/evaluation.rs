@@ -15,13 +15,17 @@ pub trait EvaluationEngineTrait<G: Group>: Clone + Send + Sync {
   /// A type that holds the verifier key
   type VerifierKey: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
+  /// A type that holds the random point
+  type RandomPoint: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;
+
   /// A type that holds the evaluation argument
   type EvaluationArgument: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// A method to perform any additional setup needed to produce proofs of evaluations
   fn setup(
     ck: &<<G as Group>::CE as CommitmentEngineTrait<G>>::CommitmentKey,
-  ) -> (Self::ProverKey, Self::VerifierKey);
+    r: G::PreprocessedGroupElement,
+  ) -> (Self::ProverKey, Self::VerifierKey, G::PreprocessedGroupElement);
 
   /// A method to prove the evaluation of a multilinear polynomial
   fn prove(
@@ -32,6 +36,7 @@ pub trait EvaluationEngineTrait<G: Group>: Clone + Send + Sync {
     poly: &[G::Scalar],
     point: &[G::Scalar],
     eval: &G::Scalar,
+    r: &G::PreprocessedGroupElement,
   ) -> Result<Self::EvaluationArgument, NovaError>;
 
   /// A method to verify the purported evaluation of a multilinear polynomials
@@ -42,5 +47,6 @@ pub trait EvaluationEngineTrait<G: Group>: Clone + Send + Sync {
     point: &[G::Scalar],
     eval: &G::Scalar,
     arg: &Self::EvaluationArgument,
+    r: &G::PreprocessedGroupElement,
   ) -> Result<(), NovaError>;
 }

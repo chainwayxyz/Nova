@@ -41,14 +41,17 @@ impl<G> EvaluationEngineTrait<G> for EvaluationEngine<G>
 where
   G: Group,
   CommitmentKey<G>: CommitmentKeyExtTrait<G>,
+  
 {
   type ProverKey = ProverKey<G>;
   type VerifierKey = VerifierKey<G>;
+  type RandomPoint = G::Scalar;
   type EvaluationArgument = InnerProductArgument<G>;
 
   fn setup(
     ck: &<<G as Group>::CE as CommitmentEngineTrait<G>>::CommitmentKey,
-  ) -> (Self::ProverKey, Self::VerifierKey) {
+    r_gn: G::PreprocessedGroupElement,
+  ) -> (Self::ProverKey, Self::VerifierKey, G::PreprocessedGroupElement) {
     let ck_c = G::CE::setup(b"ipa", 1);
 
     let pk = ProverKey { ck_s: ck_c.clone() };
@@ -56,8 +59,7 @@ where
       ck_v: ck.clone(),
       ck_s: ck_c,
     };
-
-    (pk, vk)
+    (pk, vk, r_gn)
   }
 
   fn prove(
@@ -68,6 +70,7 @@ where
     poly: &[G::Scalar],
     point: &[G::Scalar],
     eval: &G::Scalar,
+    r: &G::PreprocessedGroupElement,
   ) -> Result<Self::EvaluationArgument, NovaError> {
     let u = InnerProductInstance::new(comm, &EqPolynomial::new(point.to_vec()).evals(), eval);
     let w = InnerProductWitness::new(poly);
@@ -83,6 +86,7 @@ where
     point: &[G::Scalar],
     eval: &G::Scalar,
     arg: &Self::EvaluationArgument,
+    r: &G::PreprocessedGroupElement,
   ) -> Result<(), NovaError> {
     let u = InnerProductInstance::new(comm, &EqPolynomial::new(point.to_vec()).evals(), eval);
 
