@@ -586,6 +586,7 @@ where
   _p_c2: PhantomData<C2>,
 }
 
+/// struct for holding the random point used in the blinding
 pub struct RandomPoint<G1, G2>
 where
   G1: Group<Base = <G2 as Group>::Scalar>,
@@ -634,7 +635,7 @@ where
   /// Creates prover and verifier keys for `CompressedSNARK`
   pub fn setup(
     pp: &PublicParams<G1, G2, C1, C2>,
-    rng: impl RngCore,
+    mut rng: impl RngCore,
   ) -> Result<
     (
       ProverKey<G1, G2, C1, C2, S1, S2>,
@@ -644,8 +645,8 @@ where
     NovaError,
   > {
     //TODO: change the setup parameters
-    let (pk_primary, vk_primary, r1) = S1::setup(&pp.ck_primary, &pp.r1cs_shape_primary, rng)?;
-    let (pk_secondary, vk_secondary, r2) = S2::setup(&pp.ck_secondary, &pp.r1cs_shape_secondary, rng)?;
+    let (pk_primary, vk_primary, r1) = S1::setup(&pp.ck_primary, &pp.r1cs_shape_primary, &mut rng)?;
+    let (pk_secondary, vk_secondary, r2) = S2::setup(&pp.ck_secondary, &pp.r1cs_shape_secondary, &mut rng)?;
 
     let pk = ProverKey {
       pk_primary,

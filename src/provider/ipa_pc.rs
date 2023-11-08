@@ -75,7 +75,7 @@ where
     let u = InnerProductInstance::new(comm, &EqPolynomial::new(point.to_vec()).evals(), eval);
     let w = InnerProductWitness::new(poly);
 
-    InnerProductArgument::prove(ck, &pk.ck_s, &u, &w, transcript)
+    InnerProductArgument::prove(ck, &pk.ck_s, &u, &w, transcript, r)
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
@@ -96,6 +96,7 @@ where
       (2_usize).pow(point.len() as u32),
       &u,
       transcript,
+      r,
     )?;
 
     Ok(())
@@ -178,8 +179,11 @@ where
     U: &InnerProductInstance<G>,
     W: &InnerProductWitness<G>,
     transcript: &mut G::TE,
+    r: &G::PreprocessedGroupElement,
   ) -> Result<Self, NovaError> {
     transcript.dom_sep(Self::protocol_name());
+
+    println!("r = {:?}", r);
 
     let (ck, _) = ck.split_at(U.b_vec.len());
 
@@ -291,8 +295,11 @@ where
     n: usize,
     U: &InnerProductInstance<G>,
     transcript: &mut G::TE,
+    r: &G::PreprocessedGroupElement,
   ) -> Result<(), NovaError> {
     let (ck, _) = ck.split_at(U.b_vec.len());
+
+    println!("r = {:?}", r);
 
     transcript.dom_sep(Self::protocol_name());
     if U.b_vec.len() != n

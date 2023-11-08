@@ -67,8 +67,9 @@ fn bench_compressed_snark(c: &mut Criterion) {
     // Produce public parameters
     let pp = PublicParams::<G1, G2, C1, C2>::setup(&c_primary, &c_secondary);
 
+    let mut rng = rand::thread_rng();
     // Produce prover and verifier keys for CompressedSNARK
-    let (pk, vk) = CompressedSNARK::<_, _, _, _, S1, S2>::setup(&pp).unwrap();
+    let (pk, vk) = CompressedSNARK::<_, _, _, _, S1, S2>::setup(&pp, rng).unwrap();
 
     // produce a recursive SNARK
     let num_steps = 3;
@@ -149,8 +150,10 @@ fn bench_compressed_snark_with_computational_commitments(c: &mut Criterion) {
     // Produce public parameters
     let pp = PublicParams::<G1, G2, C1, C2>::setup(&c_primary, &c_secondary);
 
+    let mut rng = rand::thread_rng();
+
     // Produce prover and verifier keys for CompressedSNARK
-    let (pk, vk) = CompressedSNARK::<_, _, _, _, SS1, SS2>::setup(&pp).unwrap();
+    let (pk, vk) = CompressedSNARK::<_, _, _, _, SS1, SS2>::setup(&pp, rng).unwrap();
 
     // produce a recursive SNARK
     let num_steps = 3;
