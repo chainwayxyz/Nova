@@ -182,12 +182,12 @@ where
     W: &InnerProductWitness<G>,
     transcript: &mut G::TE,
     r: &G::PreprocessedGroupElement,
-    rng: impl RngCore,
+    mut rng: impl RngCore,
   ) -> Result<Self, NovaError> {
     transcript.dom_sep(Self::protocol_name());
 
-    let random_value = G::Scalar::random(rng);
-    println!("random_value = {:?}", random_value);
+    // let random_value = G::Scalar::random(rng);
+    // println!("random_value = {:?}", random_value);
 
     println!("r = {:?}", r);
     println!("typeof r: {:?}", std::any::type_name::<G::PreprocessedGroupElement>());
@@ -196,6 +196,11 @@ where
 
     if U.b_vec.len() != W.a_vec.len() {
       return Err(NovaError::InvalidInputLength);
+    }
+
+    let mut s_poly = W.a_vec.clone();
+    for coeff in s_poly.iter_mut() {
+        *coeff = G::Scalar::random(&mut rng);
     }
 
     // absorb the instance in the transcript
