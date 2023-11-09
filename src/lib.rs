@@ -586,16 +586,6 @@ where
   _p_c2: PhantomData<C2>,
 }
 
-/// struct for holding the random point used in the blinding
-pub struct RandomPoint<G1, G2>
-where
-  G1: Group<Base = <G2 as Group>::Scalar>,
-  G2: Group<Base = <G1 as Group>::Scalar>,
-{
-  r1: G1::PreprocessedGroupElement,
-  r2: G2::PreprocessedGroupElement,
-}
-
 /// A SNARK that proves the knowledge of a valid `RecursiveSNARK`
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -640,7 +630,8 @@ where
     (
       ProverKey<G1, G2, C1, C2, S1, S2>,
       VerifierKey<G1, G2, C1, C2, S1, S2>,
-      RandomPoint<G1, G2>,
+      G1::PreprocessedGroupElement,
+      G2::PreprocessedGroupElement,
     ),
     NovaError,
   > {
@@ -667,9 +658,7 @@ where
       _p_c2: Default::default(),
     };
 
-    let r = RandomPoint { r1, r2 };
-
-    Ok((pk, vk, r))
+    Ok((pk, vk, r1, r2))
   }
 
   /// Create a new `CompressedSNARK`
@@ -1164,7 +1153,7 @@ mod tests {
     let rng = &mut rand::thread_rng();
 
     // produce the prover and verifier keys for compressed snark
-    let (pk, vk, _) = CompressedSNARK::<_, _, _, _, S<G1, E1>, S<G2, E2>>::setup(&pp, rng).unwrap();
+    let (pk, vk, _, _) = CompressedSNARK::<_, _, _, _, S<G1, E1>, S<G2, E2>>::setup(&pp, rng).unwrap();
 
     // produce a compressed SNARK
     let res =
@@ -1257,7 +1246,7 @@ mod tests {
     let rng = &mut rand::thread_rng();
 
     // produce the prover and verifier keys for compressed snark
-    let (pk, vk, _) =
+    let (pk, vk, _, _) =
       CompressedSNARK::<_, _, _, _, SPrime<G1, E1>, SPrime<G2, E2>>::setup(&pp, rng).unwrap();
 
     // produce a compressed SNARK
@@ -1414,7 +1403,7 @@ mod tests {
     let rng = &mut rand::thread_rng();
 
     // produce the prover and verifier keys for compressed snark
-    let (pk, vk, _) = CompressedSNARK::<_, _, _, _, S<G1, E1>, S<G2, E2>>::setup(&pp, rng).unwrap();
+    let (pk, vk, _, _) = CompressedSNARK::<_, _, _, _, S<G1, E1>, S<G2, E2>>::setup(&pp, rng).unwrap();
 
     // produce a compressed SNARK
     let res =

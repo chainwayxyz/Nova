@@ -906,7 +906,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> DigestHelperTrait<G> for VerifierKe
 impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for RelaxedR1CSSNARK<G, EE> {
   type ProverKey = ProverKey<G, EE>;
   type VerifierKey = VerifierKey<G, EE>;
-  type RandomPoint = EE::RandomPoint;
 
   fn setup(
     ck: &CommitmentKey<G>,
@@ -914,7 +913,10 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
     mut rng: impl RngCore,
   ) -> Result<(Self::ProverKey, Self::VerifierKey, G::PreprocessedGroupElement), NovaError> {
     let r = G::Scalar::random(&mut rng);
+    println!("random number: {:?}", r);
     let gn = G::get_generator().preprocessed();
+    println!("gn: {:?}", gn);
+
     let r_gn = G::vartime_multiscalar_mul(&[r], &[gn]).preprocessed();
     let (pk_ee, vk_ee, r_gn) = EE::setup(ck, r_gn);
 

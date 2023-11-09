@@ -184,6 +184,7 @@ where
     transcript.dom_sep(Self::protocol_name());
 
     println!("r = {:?}", r);
+    println!("typeof r: {:?}", std::any::type_name::<G::PreprocessedGroupElement>());
 
     let (ck, _) = ck.split_at(U.b_vec.len());
 

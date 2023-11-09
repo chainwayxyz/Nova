@@ -19,9 +19,6 @@ pub trait RelaxedR1CSSNARKTrait<G: Group>:
   /// A type that represents the verifier's key
   type VerifierKey: Send + Sync + Serialize + for<'de> Deserialize<'de> + DigestHelperTrait<G>;
 
-  /// A type that represents the uniformly sampled random curve point
-  type RandomPoint: Send + Sync + Serialize + for<'de> Deserialize<'de>;
-
   /// Produces the keys for the prover and the verifier
   fn setup(
     ck: &CommitmentKey<G>,
