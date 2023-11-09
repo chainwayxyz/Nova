@@ -240,11 +240,12 @@ fn main() {
     );
     assert!(res.is_ok());
 
-    let rng = &mut rand::thread_rng();
+    let rng1 = &mut rand::thread_rng();
+    let rng2 = &mut rand::thread_rng();
 
     // produce a compressed SNARK
     println!("Generating a CompressedSNARK using Spartan with IPA-PC...");
-    let (pk, vk, _, _) = CompressedSNARK::<_, _, _, _, S1, S2>::setup(&pp, rng).unwrap();
+    let (pk, vk, _, _) = CompressedSNARK::<_, _, _, _, S1, S2>::setup(&pp, rng1).unwrap();
 
     let start = Instant::now();
     type EE1 = nova_snark::provider::ipa_pc::EvaluationEngine<G1>;
@@ -252,7 +253,7 @@ fn main() {
     type S1 = nova_snark::spartan::snark::RelaxedR1CSSNARK<G1, EE1>;
     type S2 = nova_snark::spartan::snark::RelaxedR1CSSNARK<G2, EE2>;
 
-    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark);
+    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark, rng2);
     println!(
       "CompressedSNARK::prove: {:?}, took {:?}",
       res.is_ok(),

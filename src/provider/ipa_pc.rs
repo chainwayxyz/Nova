@@ -15,6 +15,7 @@ use ff::Field;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
+use rand_core::RngCore;
 
 /// Provides an implementation of the prover key
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -71,11 +72,12 @@ where
     point: &[G::Scalar],
     eval: &G::Scalar,
     r: &G::PreprocessedGroupElement,
+    rng: impl RngCore,
   ) -> Result<Self::EvaluationArgument, NovaError> {
     let u = InnerProductInstance::new(comm, &EqPolynomial::new(point.to_vec()).evals(), eval);
     let w = InnerProductWitness::new(poly);
 
-    InnerProductArgument::prove(ck, &pk.ck_s, &u, &w, transcript, r)
+    InnerProductArgument::prove(ck, &pk.ck_s, &u, &w, transcript, r, rng)
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
@@ -180,8 +182,12 @@ where
     W: &InnerProductWitness<G>,
     transcript: &mut G::TE,
     r: &G::PreprocessedGroupElement,
+    rng: impl RngCore,
   ) -> Result<Self, NovaError> {
     transcript.dom_sep(Self::protocol_name());
+
+    let random_value = G::Scalar::random(rng);
+    println!("random_value = {:?}", random_value);
 
     println!("r = {:?}", r);
     println!("typeof r: {:?}", std::any::type_name::<G::PreprocessedGroupElement>());

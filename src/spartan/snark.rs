@@ -127,6 +127,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
     S: &R1CSShape<G>,
     U: &RelaxedR1CSInstance<G>,
     W: &RelaxedR1CSWitness<G>,
+    mut rng: impl RngCore,
   ) -> Result<Self, NovaError> {
     // pad the R1CSShape
     let S = S.pad();
@@ -362,6 +363,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
       &r_z,
       &eval_joint,
       &pk.r_gn,
+      &mut rng,
     )?;
 
     Ok(RelaxedR1CSSNARK {
