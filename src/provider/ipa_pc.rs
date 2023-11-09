@@ -21,6 +21,7 @@ use std::marker::PhantomData;
 #[serde(bound = "")]
 pub struct ProverKey<G: Group> {
   ck_s: CommitmentKey<G>,
+  ck_b: CommitmentKey<G>,
 }
 
 /// Provides an implementation of the verifier key
@@ -29,6 +30,7 @@ pub struct ProverKey<G: Group> {
 pub struct VerifierKey<G: Group> {
   ck_v: CommitmentKey<G>,
   ck_s: CommitmentKey<G>,
+  ck_b: CommitmentKey<G>,
 }
 
 /// Provides an implementation of a polynomial evaluation engine using IPA
@@ -50,11 +52,16 @@ where
     ck: &<<G as Group>::CE as CommitmentEngineTrait<G>>::CommitmentKey,
   ) -> (Self::ProverKey, Self::VerifierKey) {
     let ck_c = G::CE::setup(b"ipa", 1);
+    let ck_b = G::CE::setup(b"ipa", 1);
 
-    let pk = ProverKey { ck_s: ck_c.clone() };
+    let pk = ProverKey { 
+      ck_s: ck_c.clone(),
+      ck_b: ck_b.clone(),
+    };
     let vk = VerifierKey {
       ck_v: ck.clone(),
       ck_s: ck_c,
+      ck_b,
     };
 
     (pk, vk)
@@ -69,10 +76,14 @@ where
     point: &[G::Scalar],
     eval: &G::Scalar,
   ) -> Result<Self::EvaluationArgument, NovaError> {
+    //let p = vec![G::Scalar::from(3), G::Scalar::from(1), G::Scalar::from(4)];
+    //let ep = &EqPolynomial::new(p.to_vec()).evals();
+    //println!("ep: {:?}", ep);
+    //println!("poly len {}, point len {}", poly.len(), point.len());
     let u = InnerProductInstance::new(comm, &EqPolynomial::new(point.to_vec()).evals(), eval);
     let w = InnerProductWitness::new(poly);
 
-    InnerProductArgument::prove(ck, &pk.ck_s, &u, &w, transcript)
+    InnerProductArgument::prove(ck, &pk.ck_s, &pk.ck_b, &u, &w, transcript)
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
@@ -89,6 +100,7 @@ where
     arg.verify(
       &vk.ck_v,
       &vk.ck_s,
+      &vk.ck_b,
       (2_usize).pow(point.len() as u32),
       &u,
       transcript,
@@ -171,6 +183,7 @@ where
   fn prove(
     ck: &CommitmentKey<G>,
     ck_c: &CommitmentKey<G>,
+    _ck_b: &CommitmentKey<G>,
     U: &InnerProductInstance<G>,
     W: &InnerProductWitness<G>,
     transcript: &mut G::TE,
@@ -284,6 +297,7 @@ where
     &self,
     ck: &CommitmentKey<G>,
     ck_c: &CommitmentKey<G>,
+    _ck_b: &CommitmentKey<G>,
     n: usize,
     U: &InnerProductInstance<G>,
     transcript: &mut G::TE,

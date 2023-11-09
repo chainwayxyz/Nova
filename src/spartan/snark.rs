@@ -330,12 +330,16 @@ impl<G: Group, EE: EvaluationEngineTrait<G>> RelaxedR1CSSNARKTrait<G> for Relaxe
     // we now combine evaluation claims at the same point rz into one
     let gamma = transcript.squeeze(b"g")?;
     let powers_of_gamma: Vec<G::Scalar> = powers::<G>(&gamma, num_claims);
+    //println!("num claims: {}", num_claims);
+    //println!("gamma {:?}, {:?}", powers_of_gamma[0], powers_of_gamma[1]);
+    //println!("u vec {:?}, {:?}", u_vec_padded[0], u_vec_padded[1]);
     let comm_joint = u_vec_padded
       .iter()
       .zip(powers_of_gamma.iter())
       .map(|(u, g_i)| u.c * *g_i)
       .fold(Commitment::<G>::default(), |acc, item| acc + item);
     let poly_joint = PolyEvalWitness::weighted_sum(&w_vec_padded, &powers_of_gamma);
+    println!("w: {:?}", w_vec_padded[0].p[0]);
     let eval_joint = claims_batch_left
       .iter()
       .zip(powers_of_gamma.iter())
