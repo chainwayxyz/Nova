@@ -198,16 +198,23 @@ where
       return Err(NovaError::InvalidInputLength);
     }
 
-    let mut s_poly = W.a_vec.clone();
-    for coeff in s_poly.iter_mut() {
+    let mut sampled_rand_poly = W.a_vec.clone();
+    for coeff in sampled_rand_poly.iter_mut() {
         *coeff = G::Scalar::random(&mut rng);
     }
+
+    let rand_poly_blinder = G::Scalar::random(&mut rng);
+
+    let b_rand_poly_comm = CE::<G>::commit_zk(&ck_c, &sampled_rand_poly, r.clone(), rand_poly_blinder).compress();
 
     // absorb the instance in the transcript
     transcript.absorb(b"U", U);
 
     // sample a random base for committing to the inner product
-    let r = transcript.squeeze(b"r")?;
+    let alpha = transcript.squeeze(b"alpha")?;
+
+    let new_poly = 
+
     let ck_c = ck_c.scale(&r);
 
     // a closure that executes a step of the recursive inner product argument

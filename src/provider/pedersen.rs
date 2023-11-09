@@ -199,6 +199,28 @@ impl<G: Group> CommitmentEngineTrait<G> for CommitmentEngine<G> {
       comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
     }
   }
+
+  fn commit_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], g: G::PreprocessedGroupElement, r: G::Scalar) -> Self::Commitment {
+    assert!(ck.ck.len() >= v.len());
+    let mut v_new = v.to_vec();
+    v_new.push(r);
+    let mut ck_new = ck.ck.clone();
+    ck_new.push(g);
+    Commitment {
+      comm: G::vartime_multiscalar_mul(&v_new[..v.len() + 1], &ck_new[..v.len() + 1]),
+    }
+  }
+
+  fn open_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], g: G::PreprocessedGroupElement) -> Self::Commitment {
+    assert!(ck.ck.len() >= v.len());
+    let mut v_new = v.to_vec();
+    v_new.push(G::Scalar::ONE);
+    let mut ck_new = ck.ck.clone();
+    ck_new.push(g);
+    Commitment {
+      comm: G::vartime_multiscalar_mul(&v_new[..v.len() + 1], &ck_new[..v.len() + 1]),
+    }
+  }
 }
 
 /// A trait listing properties of a commitment key that can be managed in a divide-and-conquer fashion

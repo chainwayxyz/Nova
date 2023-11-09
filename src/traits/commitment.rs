@@ -85,4 +85,10 @@ pub trait CommitmentEngineTrait<G: Group>: Clone + Send + Sync {
 
   /// Commits to the provided vector using the provided generators
   fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment;
+
+  ///zk commitment
+  fn commit_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], g: G::PreprocessedGroupElement, r: G::Scalar) -> Self::Commitment;
+
+  ///zk opening
+  fn open_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], g: G::PreprocessedGroupElement) -> Self::Commitment;
 }
