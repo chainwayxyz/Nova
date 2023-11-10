@@ -212,7 +212,6 @@ where
     for coeff in sampled_rand_poly.iter_mut() {
         *coeff = G::Scalar::random(&mut rng);
     }
-    println!("sampled_rand_poly = {:?}", sampled_rand_poly[0]);
 
     let const_coeff = inner_product(&sampled_rand_poly, &U.b_vec);
 
@@ -226,13 +225,16 @@ where
     transcript.absorb(b"b_rand_poly_comm", &b_rand_poly_comm);
 
     let alpha = transcript.squeeze(b"alpha")?;
-    println!("alpha = {:?}\n", alpha);
-
+    println!("sampled_rand_poly = {:?}", sampled_rand_poly[0]);
+    println!("alpha = {:?}", alpha);
+    println!("a_vec = {:?}", W.a_vec[0]);
     let new_poly = sampled_rand_poly.iter()
     .zip(W.a_vec.clone().iter())
-    .map(|(a, b)| *a * alpha + b)
+    .map(|(a, b)| *a * alpha + *b)
     .collect::<Vec<G::Scalar>>();
     println!("new_poly = {:?}", new_poly[0]);
+    let claim_zero = sampled_rand_poly[0] * alpha + W.a_vec[0] - new_poly[0];
+    println!("claim_zero = {:?}", claim_zero);
 
     let comm_rand = rand_poly_blinder * alpha;
     println!("comm_rand = {:?}", comm_rand);
@@ -371,6 +373,7 @@ where
     println!("IPA verifier");
     let (ck, _) = ck.split_at(U.b_vec.len());
     println!("U.c = {:?}", U.c);
+    println!("a_hat = {:?}", self.a_hat);
     println!("r = {:?}", r);
 
     transcript.dom_sep(Self::protocol_name());
@@ -484,8 +487,10 @@ where
 
     let ck_hat = {
       let c = CE::<G>::commit(&ck, &s).compress();
+      println!("c = {:?}", c);
       CommitmentKey::<G>::reinterpret_commitments_as_ck(&[c])?
     };
+    println!("ck_hat = {:?}", ck_hat);
 
     let b_hat = inner_product(&U.b_vec, &s);
 
@@ -507,6 +512,10 @@ where
           .collect::<Vec<G::Scalar>>(),
       )
     };
+
+    println!("P_hat = {:?}", P_hat);
+    println!("b_hat = {:?}", b_hat);
+    println!("a_hat = {:?}", self.a_hat);
 
     if P_hat == CE::<G>::commit(&ck_hat.combine(&ck_c), &[self.a_hat, self.a_hat * b_hat]) {
       Ok(())
