@@ -85,4 +85,7 @@ pub trait CommitmentEngineTrait<G: Group>: Clone + Send + Sync {
 
   /// Commits to the provided vector using the provided generators
   fn commit(ck: &Self::CommitmentKey, v: &[G::Scalar]) -> Self::Commitment;
+
+  /// Commits to the provided vector using the provided generators (ZK)
+  fn commit_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], S: &Self::CommitmentKey, omega: G::Scalar) -> Self::Commitment;
 }

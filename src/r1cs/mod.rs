@@ -66,6 +66,8 @@ pub struct R1CSInstance<G: Group> {
 pub struct RelaxedR1CSWitness<G: Group> {
   pub(crate) W: Vec<G::Scalar>,
   pub(crate) E: Vec<G::Scalar>,
+  pub(crate) rW: G::Scalar,
+  pub(crate) rE: G::Scalar,
 }
 
 /// A type that holds a Relaxed R1CS instance
@@ -401,6 +403,8 @@ impl<G: Group> RelaxedR1CSWitness<G> {
     RelaxedR1CSWitness {
       W: vec![G::Scalar::ZERO; S.num_vars],
       E: vec![G::Scalar::ZERO; S.num_cons],
+      rW: G::Scalar::ZERO,
+      rE: G::Scalar::ZERO,
     }
   }
 

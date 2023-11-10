@@ -199,6 +199,13 @@ impl<G: Group> CommitmentEngineTrait<G> for CommitmentEngine<G> {
       comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
     }
   }
+
+  fn commit_zk(ck: &Self::CommitmentKey, v: &[G::Scalar], S: &Self::CommitmentKey, omega: G::Scalar) -> Self::Commitment {
+    assert!(ck.ck.len() >= v.len());
+    Commitment {
+      comm: G::vartime_multiscalar_mul(v, &ck.ck[..v.len()]).add(G::vartime_multiscalar_mul(&[omega], &S.ck)),
+    }
+  }
 }
 
 /// A trait listing properties of a commitment key that can be managed in a divide-and-conquer fashion
