@@ -74,6 +74,9 @@ where
     r: &G::PreprocessedGroupElement,
     rng: impl RngCore,
   ) -> Result<Self::EvaluationArgument, NovaError> {
+    println!("IPA general prover");
+    println!("comm = {:?}", comm);
+    println!("r = {:?}", r);
     let u = InnerProductInstance::new(comm, &EqPolynomial::new(point.to_vec()).evals(), eval);
     let w = InnerProductWitness::new(poly);
 
@@ -90,6 +93,9 @@ where
     arg: &Self::EvaluationArgument,
     r: &G::PreprocessedGroupElement,
   ) -> Result<(), NovaError> {
+    println!("IPA general verifier");
+    println!("comm = {:?}", comm);
+    println!("r = {:?}", r);
     let u = InnerProductInstance::new(comm, &EqPolynomial::new(point.to_vec()).evals(), eval);
 
     arg.verify(
@@ -164,6 +170,8 @@ pub struct InnerProductArgument<G: Group> {
   L_vec: Vec<CompressedCommitment<G>>,
   R_vec: Vec<CompressedCommitment<G>>,
   a_hat: G::Scalar,
+  b_rand_poly_comm: CompressedCommitment<G>,
+  comm_randomness: G::Scalar,
 }
 
 impl<G> InnerProductArgument<G>
@@ -186,9 +194,8 @@ where
   ) -> Result<Self, NovaError> {
     transcript.dom_sep(Self::protocol_name());
 
-    // let random_value = G::Scalar::random(rng);
-    // println!("random_value = {:?}", random_value);
-
+    println!("IPA prover");
+    println!("U.c = {:?}", U.c);
     println!("r = {:?}", r);
     println!("typeof r: {:?}", std::any::type_name::<G::PreprocessedGroupElement>());
 
@@ -198,24 +205,63 @@ where
       return Err(NovaError::InvalidInputLength);
     }
 
+    // absorb the instance in the transcript
+    transcript.absorb(b"U", U);
+
     let mut sampled_rand_poly = W.a_vec.clone();
     for coeff in sampled_rand_poly.iter_mut() {
         *coeff = G::Scalar::random(&mut rng);
     }
+    println!("sampled_rand_poly = {:?}", sampled_rand_poly[0]);
+
+    let const_coeff = inner_product(&sampled_rand_poly, &U.b_vec);
+
+    sampled_rand_poly[0] -= const_coeff;
 
     let rand_poly_blinder = G::Scalar::random(&mut rng);
+    println!("rand_poly_blinder = {:?}", rand_poly_blinder);
 
-    let b_rand_poly_comm = CE::<G>::commit_zk(&ck_c, &sampled_rand_poly, r.clone(), rand_poly_blinder).compress();
+    let b_rand_poly_comm = CE::<G>::commit_zk(&ck, &sampled_rand_poly, r.clone(), rand_poly_blinder).compress();
 
-    // absorb the instance in the transcript
-    transcript.absorb(b"U", U);
+    transcript.absorb(b"b_rand_poly_comm", &b_rand_poly_comm);
+
+    let alpha = transcript.squeeze(b"alpha")?;
+    println!("alpha = {:?}\n", alpha);
+
+    let new_poly = sampled_rand_poly.iter()
+    .zip(W.a_vec.clone().iter())
+    .map(|(a, b)| *a * alpha + b)
+    .collect::<Vec<G::Scalar>>();
+    println!("new_poly = {:?}", new_poly[0]);
+
+    let comm_rand = rand_poly_blinder * alpha;
+    println!("comm_rand = {:?}", comm_rand);
+
+    let neg_comm_rand = G::Scalar::ZERO - comm_rand;
+    println!("neg_comm_rand = {:?}", neg_comm_rand);
+
+    // let new_comm = orig_comm + alpha * b_rand_poly_comm + comm_rand * r;
+    let comp_U_sol = U.comm_a_vec.compress();
+    println!("comp_U_sol = {:?}", comp_U_sol);
+
+    let ck_temp1 = CommitmentKey::<G>::reinterpret_commitments_as_ck(&[comp_U_sol])?;
+    let ck_temp2 = CommitmentKey::<G>::reinterpret_commitments_as_ck(&[b_rand_poly_comm.clone()])?;
+    println!("ck_temp1 = {:?}", ck_temp1);
+    println!("ck_temp2 = {:?}", ck_temp2);
+
+    let ck_temp = ck_temp1.combine(&ck_temp2);
+    println!("ck_temp = {:?}", ck_temp);
+    let fin_comm = CE::<G>::commit_zk(&ck_temp, &[G::Scalar::ONE, alpha], r.clone(), neg_comm_rand);
+    println!("fin_comm = {:?}", fin_comm);
+
+
+    transcript.absorb(b"fin_comm", &fin_comm);
 
     // sample a random base for committing to the inner product
-    let alpha = transcript.squeeze(b"alpha")?;
-
-    let new_poly = 
-
-    let ck_c = ck_c.scale(&r);
+    let fs_xi = transcript.squeeze(b"fs_xi")?;
+    println!("fs_xi = {:?}", fs_xi);
+    let ck_c = ck_c.scale(&fs_xi);
+    println!("ck_c = {:?}", ck_c);
 
     // a closure that executes a step of the recursive inner product argument
     let prove_inner = |a_vec: &[G::Scalar],
@@ -261,6 +307,7 @@ where
       transcript.absorb(b"R", &R);
 
       let r = transcript.squeeze(b"r")?;
+      println!("r = {:?}", r);
       let r_inverse = r.invert().unwrap();
 
       // fold the left half and the right half
@@ -286,7 +333,7 @@ where
     let mut R_vec: Vec<CompressedCommitment<G>> = Vec::new();
 
     // we create mutable copies of vectors and generators
-    let mut a_vec = W.a_vec.to_vec();
+    let mut a_vec = new_poly.to_vec();
     let mut b_vec = U.b_vec.to_vec();
     let mut ck = ck;
     for _i in 0..usize::try_from(U.b_vec.len().ilog2()).unwrap() {
@@ -299,11 +346,16 @@ where
       b_vec = b_vec_folded;
       ck = ck_folded;
     }
+    println!("a_vec = {:?}", a_vec[0]);
+    println!("L_vec = {:?}", L_vec[0]);
+    println!("R_vec = {:?}", R_vec[0]);
 
     Ok(InnerProductArgument {
       L_vec,
       R_vec,
       a_hat: a_vec[0],
+      b_rand_poly_comm: b_rand_poly_comm,
+      comm_randomness: comm_rand,
     })
   }
 
@@ -316,8 +368,9 @@ where
     transcript: &mut G::TE,
     r: &G::PreprocessedGroupElement,
   ) -> Result<(), NovaError> {
+    println!("IPA verifier");
     let (ck, _) = ck.split_at(U.b_vec.len());
-
+    println!("U.c = {:?}", U.c);
     println!("r = {:?}", r);
 
     transcript.dom_sep(Self::protocol_name());
@@ -331,12 +384,36 @@ where
 
     // absorb the instance in the transcript
     transcript.absorb(b"U", U);
+    transcript.absorb(b"b_rand_poly_comm", &self.b_rand_poly_comm);
+
+    let alpha = transcript.squeeze(b"alpha")?;
+    println!("alpha = {:?}", alpha);
+
+  // let fin_comm = CE::<G>::commit_zk(&ck_temp, &[G::Scalar::ONE, alpha], r.clone(), neg_comm_rand).compress();
+
+    let neg_comm_rand = G::Scalar::ZERO - self.comm_randomness;
+    let comp_U_sol = U.comm_a_vec.compress();
+    println!("comp_U_sol = {:?}", comp_U_sol);
+
+    let ck_temp1 = CommitmentKey::<G>::reinterpret_commitments_as_ck(&[comp_U_sol])?;
+    let ck_temp2 = CommitmentKey::<G>::reinterpret_commitments_as_ck(&[self.b_rand_poly_comm.clone()])?;
+    println!("ck_temp1 = {:?}", ck_temp1);
+    println!("ck_temp2 = {:?}", ck_temp2);
+
+    let ck_temp = ck_temp1.combine(&ck_temp2);
+    let fin_comm = CE::<G>::commit_zk(&ck_temp, &[G::Scalar::ONE, alpha], r.clone(), neg_comm_rand);
+    println!("fin_comm = {:?}", fin_comm);
+
+    transcript.absorb(b"fin_comm", &fin_comm);
 
     // sample a random base for committing to the inner product
-    let r = transcript.squeeze(b"r")?;
-    let ck_c = ck_c.scale(&r);
+    let fs_xi = transcript.squeeze(b"fs_xi")?;
+    println!("fs_xi = {:?}", fs_xi);
+    let ck_c = ck_c.scale(&fs_xi);
+    println!("ck_c = {:?}", ck_c);
 
-    let P = U.comm_a_vec + CE::<G>::commit(&ck_c, &[U.c]);
+    let P = fin_comm + CE::<G>::commit(&ck_c, &[U.c]);
+    println!("P = {:?}", P);
 
     let batch_invert = |v: &[G::Scalar]| -> Result<Vec<G::Scalar>, NovaError> {
       let mut products = vec![G::Scalar::ZERO; v.len()];
@@ -373,6 +450,9 @@ where
         transcript.squeeze(b"r")
       })
       .collect::<Result<Vec<G::Scalar>, NovaError>>()?;
+    println!("r[0] = {:?}", r[0]);
+    println!("r[1] = {:?}", r[1]);
+    println!("r[2] = {:?}", r[2]);
 
     // precompute scalars necessary for verification
     let r_square: Vec<G::Scalar> = (0..self.L_vec.len())
