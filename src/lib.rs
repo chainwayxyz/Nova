@@ -387,7 +387,7 @@ where
     self.r_U_primary = r_U_primary;
     self.r_W_primary = r_W_primary;
 
-    self.i += 1;
+    self.i = 1;
 
     self.r_U_secondary = r_U_secondary;
     self.r_W_secondary = r_W_secondary;

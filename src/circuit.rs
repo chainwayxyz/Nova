@@ -318,14 +318,14 @@ impl<G: Group, SC: StepCircuit<G::Base>> Circuit<<G as Group>::Base>
 
     // Compute i + 1
     let i_new = AllocatedNum::alloc(cs.namespace(|| "i + 1"), || {
-      Ok(*i.get_value().get()? + G::Base::ONE)
+      Ok(G::Base::ONE)
     })?;
-    cs.enforce(
-      || "check i + 1",
-      |lc| lc,
-      |lc| lc,
-      |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
-    );
+    //cs.enforce(
+    //  || "check i + 1",
+    //  |lc| lc,
+    //  |lc| lc,
+    //  |lc| lc + i_new.get_variable() - /CS::one() - i.get_variable(),
+    //);
 
     // Compute z_{i+1}
     let z_input = conditionally_select_vec(
